@@ -1546,8 +1546,6 @@ if ($isAdmin) {
                 <p>Upload images that help verify your ownership claim:</p>
                 <ul>
                     <li>Photos of you with the item</li>
-                    <li>Purchase receipts or warranty cards</li>
-                    <li>Serial numbers or unique markings</li>
                     <li>Previous photos showing the item's condition</li>
                 </ul>
                 <p><small>Max 5 images, 2MB each. Supported: JPG, PNG, GIF</small></p>
