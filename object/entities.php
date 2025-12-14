@@ -67,6 +67,12 @@ class Location {
             return 1;
         }
     }
+    public function getLocationById($locationId) {
+    $db = DatabaseService::getInstance()->getConnection();
+    $stmt = $db->prepare("SELECT * FROM location WHERE location_id = ?");
+    $stmt->execute([$locationId]);
+    return $stmt->fetch(PDO::FETCH_ASSOC);
+}
 }
 
 class User {

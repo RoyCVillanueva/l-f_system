@@ -149,6 +149,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'confirm_return':
                 ConfirmReturn();
                 break;
+            case 'confirm_found_return':
+                ConfirmFoundReturn();
+                break;
             case 'mark_notification_read':
                 MarkNotificationRead();
                 break;
@@ -159,8 +162,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 GenerateReport();
                 break;
             case 'mark_as_found':
-            MarkAsFound();
-            break;
+                MarkAsFound();
+                break;
             default:
                 error_log("Unknown action: " . $_POST['action']);
                 break;
@@ -360,8 +363,8 @@ function DeleteReport() {
             throw new Exception("You don't have permission to delete this report.");
         }
         
-        if ($reportDetails['status'] != 'pending') {
-            throw new Exception("Can only delete reports with pending status.");
+        if (!in_array($reportDetails['status'], ['pending', 'confirmed'])) {
+        throw new Exception("Can only delete reports with pending or confirmed status.");
         }
         
         // Check if there are any claims
@@ -424,10 +427,6 @@ function SubmitClaim() {
         
         if ($reportDetails['status'] == 'returned') {
             throw new Exception("This item has already been returned to its owner.");
-        }
-        
-        if ($reportDetails['status'] == 'confirmed') {
-            throw new Exception("This item already has an approved claim.");
         }
         
         // Check for existing approved claims
@@ -515,6 +514,71 @@ function ConfirmReturn() {
     exit;
 }
 
+// Function to confirm return of found item (by owner who lost it)
+function ConfirmFoundReturn() {
+    global $current_user_id;
+    
+    try {
+        $report_id = $_POST['report_id'];
+        
+        if (empty($report_id)) {
+            throw new Exception("Report ID is required.");
+        }
+        
+        $report = new Report();
+        $reportDetails = $report->getReportById($report_id);
+        
+        // Check if report exists and is a found item
+        if (!$reportDetails) {
+            throw new Exception("Report not found.");
+        }
+        
+        if ($reportDetails['report_type'] != 'found') {
+            throw new Exception("Only found items can use this return confirmation.");
+        }
+        
+        // Check if there's an approved claim by current user
+        $claim = new Claim();
+        $claims = $claim->getClaimsByReportId($report_id);
+        
+        $userHasApprovedClaim = false;
+        foreach ($claims as $itemClaim) {
+            if ($itemClaim['status'] == 'approved' && $itemClaim['claimed_by'] == $current_user_id) {
+                $userHasApprovedClaim = true;
+                break;
+            }
+        }
+        
+        if (!$userHasApprovedClaim) {
+            throw new Exception("You don't have an approved claim for this item.");
+        }
+        
+        // Update report status to returned
+        $result = $report->updateStatus($report_id, 'returned');
+        
+        if ($result) {
+            // Update claim status to completed
+            foreach ($claims as $itemClaim) {
+                if ($itemClaim['status'] == 'approved' && $itemClaim['claimed_by'] == $current_user_id) {
+                    $claim->updateStatus($itemClaim['claim_id'], 'completed', 'Item returned to owner.');
+                    break;
+                }
+            }
+            
+            $_SESSION['message'] = 'Item successfully marked as returned!';
+        } else {
+            throw new Exception("Failed to update item status.");
+        }
+        
+    } catch (Exception $e) {
+        error_log("Error confirming found item return: " . $e->getMessage());
+        $_SESSION['error'] = 'Failed to confirm return: ' . $e->getMessage();
+    }
+    
+    header('Location: ' . $_SERVER['PHP_SELF'] . '?tab=my-reports');
+    exit;
+}
+
 function UpdateClaimStatus() {
     global $isAdmin, $current_user_id;
     
@@ -579,9 +643,20 @@ function UpdateClaimStatus() {
             // Send notifications based on claim status
             if ($status === 'approved') {
                 $claim->sendClaimApprovedNotification($claimId);
-                error_log("Claim approved, automatically marking item as returned");
-                $report->updateStatus($reportId, 'returned');
-                $_SESSION['message'] = 'Claim approved successfully! Item marked as returned.';
+    
+            // Check if this is a found item - don't automatically mark as returned
+                $reportDetails = $report->getReportById($reportId);
+    
+            if ($reportDetails['report_type'] == 'found') {
+            // For found items, just update status to confirmed
+            $report->updateStatus($reportId, 'confirmed');
+            $_SESSION['message'] = 'Claim approved successfully! The item owner can now confirm return.';
+            } else {
+            // For lost items, mark as returned (owner already confirmed)
+            $report->updateStatus($reportId, 'returned');
+            $_SESSION['message'] = 'Claim approved successfully! Item marked as returned.';
+            }
+            }
             } elseif ($status === 'rejected') {
                 $claim->sendClaimRejectedNotification($claimId, $adminNotes);
                 // Check if there are any other approved claims
@@ -603,7 +678,7 @@ function UpdateClaimStatus() {
                 
                 $_SESSION['message'] = 'Claim rejected successfully!';
             }
-        } else {
+            else {
             throw new Exception("Database update failed");
         }
         
@@ -1027,19 +1102,13 @@ if ($isAdmin) {
         </a>
     <?php endif; ?>
 </div>
-            <?php
-                $notification = new Notification();
-                $unreadCount = $notification->getUnreadCount($current_user_id);
-                if ($unreadCount > 0): ?>
-                    <span class="tab-badge"><?php echo $unreadCount; ?></span>
-                <?php endif; ?>
-        </a>
     </div>
         
         <div class="tab-content">
             <?php if ($active_tab == 'report-item'): ?>
     <div class="form-section">
         <h2>Report Lost or Found Item</h2>
+        
         <?php
         // Check if coming from "I Found This Item" button
         $prefilledData = [];
@@ -1053,15 +1122,24 @@ if ($isAdmin) {
                 $item = new Item();
                 $itemDetails = $item->getItemById($lostReport['item_id']);
                 
-                // Get location
-                $location = new Location();
-                $locationDetails = $location->getLocationById($itemDetails['location_id']);
+                // Get location directly from the report details (it should be included in getReportById)
+                // Since Location class doesn't have getLocationById(), use the location_name from report
+                $locationName = isset($lostReport['location_name']) ? $lostReport['location_name'] : '';
+                
+                // If location_name is not in report, try to get it from location table using a direct query
+                if (empty($locationName)) {
+                    $db = DatabaseService::getInstance()->getConnection();
+                    $stmt = $db->prepare("SELECT location_name FROM location WHERE location_id = ?");
+                    $stmt->execute([$itemDetails['location_id']]);
+                    $locationResult = $stmt->fetch(PDO::FETCH_ASSOC);
+                    $locationName = $locationResult ? $locationResult['location_name'] : '';
+                }
                 
                 // Set prefilled data
                 $prefilledData = [
                     'description' => htmlspecialchars($itemDetails['description']),
                     'category_id' => $itemDetails['category_id'],
-                    'location_name' => htmlspecialchars($locationDetails['location_name']),
+                    'location_name' => htmlspecialchars($locationName),
                     'report_type' => 'found',
                     'is_from_lost_report' => true,
                     'lost_report_id' => $lostReportId
@@ -1115,55 +1193,21 @@ if ($isAdmin) {
                        value="<?php echo isset($prefilledData['location_name']) ? $prefilledData['location_name'] : ''; ?>">
                 <?php if (isset($prefilledData['is_from_lost_report'])): ?>
                     <small style="color: #666; display: block; margin-top: 5px;">
-                        This location is from the lost report. Please update to where you actually found the item.
+                        Note that this location is from the lost report. Please update to where you actually found the item.
                     </small>
                 <?php endif; ?>
             </div>
 
-        <div class="report-type-selector">
-            <button type="button" class="report-type-btn active" data-type="lost">I Lost an Item</button>
-            <button type="button" class="report-type-btn" data-type="found">I Found an Item</button>
-        </div>
-        
-        <form action="" method="POST" enctype="multipart/form-data">
-            <input type="hidden" name="action" value="add_item">
-            <input type="hidden" name="report_type" id="report_type" value="lost">
-            
-            <div class="form-group">
-                <label for="description">Item Description *</label>
-                <textarea id="description" name="description" required placeholder="Describe the item in detail (color, brand, distinctive features, etc.)"></textarea>
-            </div>
-            
-            <div class="form-group">
-                <label for="category_id">Category *</label>
-                <select id="category_id" name="category_id" required>
-                    <option value="">Select Category</option>
-                    <?php
-                    $category = new Category();
-                    $categories = $category->getAll();
-                    foreach ($categories as $cat): ?>
-                        <option value="<?php echo $cat['category_id']; ?>">
-                            <?php echo $cat['category_name']; ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
-            
-            <div class="form-group">
-                <label for="location_name">Location *</label>
-                <input type="text" id="location_name" name="location_name" required 
-                       placeholder="Where did you lose/find the item?">
-            </div>
-
+            <!-- Updated Date Fields with proper display control -->
             <div class="date-fields">
-                <div class="form-group date-lost-field">
+                <div class="form-group date-lost-field" style="<?php echo (isset($prefilledData['report_type']) && $prefilledData['report_type'] == 'found') ? 'display: none;' : 'display: block;'; ?>">
                     <label for="date_lost">Date Lost *</label>
-                    <input type="date" id="date_lost" name="date_lost" required 
+                    <input type="date" id="date_lost" name="date_lost" 
                            max="<?php echo date('Y-m-d'); ?>"
                            value="<?php echo date('Y-m-d'); ?>">
                 </div>
                 
-                <div class="form-group date-found-field" style="display: none;">
+                <div class="form-group date-found-field" style="<?php echo (isset($prefilledData['report_type']) && $prefilledData['report_type'] == 'found') ? 'display: block;' : 'display: none;'; ?>">
                     <label for="date_found">Date Found *</label>
                     <input type="date" id="date_found" name="date_found" 
                            max="<?php echo date('Y-m-d'); ?>"
@@ -1173,8 +1217,14 @@ if ($isAdmin) {
             
             <div class="form-group">
                 <label for="images">Upload Images (Optional)</label>
-                <input type="file" id="images" name="images[]" multiple accept="image/*">
-                <small>You can select multiple images</small>
+                <input type="file" id="images" name="images[]" multiple accept="image/*" onchange="previewImages(event)">
+                <small>You can select multiple images. Max file size: 2MB each. Supported formats: JPG, PNG, GIF</small>
+            
+            <!-- Image preview container -->
+            <div id="image-preview-container" class="image-preview-container" style="margin-top: 15px; display: none;">
+                <h4 style="margin-bottom: 10px; font-size: 16px; color: #495057;">Selected Images:</h4>
+                <div id="image-previews" class="image-previews" style="display: flex; flex-wrap: wrap; gap: 10px;"></div>
+            </div>
             </div>
             
             <button type="submit" class="btn">Submit Report</button>
@@ -1296,12 +1346,12 @@ if ($isAdmin) {
             if (empty($items)): ?>
                 <div class="no-items">
                     <?php if (isset($_GET['search']) && !empty($_GET['search'])): ?>
-                        <div class="no-items-icon">🔍</div>
+                        <div class="no-items-icon"></div>
                         <h4>No items found</h4>
                         <p>No items match your search criteria. Try adjusting your search terms or filters.</p>
                         <a href="?tab=browse-items" class="btn">View All Items</a>
                     <?php else: ?>
-                        <div class="no-items-icon">📭</div>
+                        <div class="no-items-icon"></div>
                         <h4>No items found</h4>
                         <p>There are no items matching your current filter criteria.</p>
                         <a href="?tab=browse-items" class="btn">View All Items</a>
@@ -1309,171 +1359,147 @@ if ($isAdmin) {
                 </div>
             <?php else: ?>
                 <?php foreach ($items as $item): ?>
-                    <div class="item-card">
-                        <div class="item-header">
-                            <span class="report-type-badge <?php echo $item['report_type']; ?>">
-                                <?php echo ucfirst($item['report_type']); ?>
-                            </span>
-                            <span class="item-status status-<?php echo $item['status']; ?>">
-                                <?php echo ucfirst($item['status']); ?>
-                            </span>
-                        </div>
-                        
-                        <?php if (!empty($item['image_path'])): ?>
-                            <div class="item-image">
-                                <img src="<?php echo $item['image_path']; ?>" alt="<?php echo $item['description']; ?>">
-                            </div>
-                        <?php else: ?>
-                            <div class="item-image">
-                                <span>No Image</span>
-                            </div>
-                        <?php endif; ?>
-                        
-                        <div class="item-details">
-                            <h3><?php echo $item['category_name']; ?></h3>
-                                <p class="item-description"><?php echo $item['description']; ?></p>
-                                    <p><strong>Location:</strong> <?php echo $item['location_name']; ?></p>
-    
-    <!-- Display appropriate date based on report type -->
-                        <?php if ($item['report_type'] == 'lost' && !empty($item['date_lost'])): ?>
-                            <p><strong>Date Lost:</strong> <?php echo date('M j, Y', strtotime($item['date_lost'])); ?></p>
-                        <?php elseif ($item['report_type'] == 'found' && !empty($item['date_found'])): ?>
-                            <p><strong>Date Found:</strong> <?php echo date('M j, Y', strtotime($item['date_found'])); ?></p>
-    <?php endif; ?>
-    
-    <p><strong>Reported:</strong> <?php echo date('M j, Y g:i A', strtotime($item['created_at'])); ?></p>
+    <div class="item-card">
+        <div class="item-header">
+            <span class="report-type-badge <?php echo $item['report_type']; ?>">
+                <?php echo ucfirst($item['report_type']); ?>
+            </span>
+            <span class="item-status status-<?php echo $item['status']; ?>">
+                <?php echo ucfirst($item['status']); ?>
+            </span>
+        </div>
+        
+        <?php if (!empty($item['image_path'])): ?>
+            <div class="item-image">
+                <img src="<?php echo $item['image_path']; ?>" alt="<?php echo htmlspecialchars($item['description']); ?>">
+            </div>
+        <?php else: ?>
+            <div class="item-image">
+                <span>No Image Available</span>
+            </div>
+        <?php endif; ?>
 
-                            <?php 
-                            // Check if this item can be claimed
-                            $canBeClaimed = false;
-                            $claimMessage = '';
-                            
-                            if ($item['report_type'] == 'found' && $item['user_id'] != $current_user_id) {
-                                if ($item['status'] == 'returned') {
-                                    $claimMessage = 'This item has been returned to its owner';
-                                } elseif ($item['status'] == 'confirmed') {
-                                    $claimMessage = 'This item has been claimed and confirmed';
-                                } else {
-                                    // Check if there are any approved claims for this report
-                                    $claimCheck = new Claim();
-                                    $existingClaims = $claimCheck->getClaimsByReportId($item['report_id']);
-                                    
-                                    $hasApprovedClaim = false;
-                                    $userHasPendingClaim = false;
-                                    
-                                    foreach ($existingClaims as $existingClaim) {
-                                        if ($existingClaim['status'] == 'approved' || $existingClaim['status'] == 'completed') {
-                                            $hasApprovedClaim = true;
-                                        }
-                                        if ($existingClaim['claimed_by'] == $current_user_id && $existingClaim['status'] == 'pending') {
-                                            $userHasPendingClaim = true;
-                                        }
-                                    }
-                                    
-                                    if ($hasApprovedClaim) {
-                                        $claimMessage = 'This item has an approved claim';
-                                    } elseif ($userHasPendingClaim) {
-                                        $claimMessage = 'You have already submitted a claim for this item';
-                                    } else {
-                                        $canBeClaimed = true;
-                                    }
-                                }
-                            }
-                            ?>
-                            
-                            <?php if ($item['report_type'] == 'found' && $item['user_id'] != $current_user_id): ?>
-                                <div class="claim-section">
-                                    <?php if ($canBeClaimed): ?>
-                                        <button class="btn btn-claim" onclick="toggleClaimForm('<?php echo $item['report_id']; ?>')">
-                                            Claim This Item
-                                        </button>
-                                        
-                                        <div id="claim-form-<?php echo $item['report_id']; ?>" class="claim-form" style="display: none;">
-                                            <form action="" method="POST">
-                                                <input type="hidden" name="action" value="submit_claim">
-                                                <input type="hidden" name="report_id" value="<?php echo $item['report_id']; ?>">
-                                                <label for="claim_description_<?php echo $item['report_id']; ?>">
-                                                    Why do you think this is your item?
-                                                </label>
-                                                <textarea id="claim_description_<?php echo $item['report_id']; ?>" 
-                                                          name="claim_description" 
-                                                          required 
-                                                          placeholder="Please provide details to support your claim (e.g., distinctive features, when/where you lost it, etc.)"></textarea>
-                                                <button type="submit" class="btn btn-primary">Submit Claim</button>
-                                                <button type="button" class="btn btn-secondary" onclick="toggleClaimForm('<?php echo $item['report_id']; ?>')">Cancel</button>
-                                            </form>
-                                        </div>
-                                    <?php else: ?>
-                                        <div class="claim-message">
-                                            <?php echo $claimMessage; ?>
-                                        </div>
-                                    <?php endif; ?>
-                                </div>
-                            <?php endif; ?>
-                            <?php if ($item['report_type'] == 'lost' && $item['user_id'] != $current_user_id && $item['status'] != 'returned'): ?>
-    <div class="found-item-section" style="margin-top: 10px;">
-        <a href="?tab=report-item&found_lost_item=1&report_id=<?php echo $item['report_id']; ?>" 
-           class="btn btn-found-item" 
-           style="background: #28a745; color: white; padding: 8px 15px; border-radius: 5px; text-decoration: none; display: inline-block; font-size: 14px;">
-           <span style="margin-right: 5px;"></span> I Found This Item
-        </a>
-        <small style="display: block; margin-top: 5px; color: #666; font-size: 12px;">
-            Click to report this item as found
-        </small>
-    </div>
-<?php endif; ?>                
-                            <?php
-                            // Display claimant information for returned found items
-                            if ($item['report_type'] == 'found' && $item['status'] == 'returned') {
-                                $claimCheck = new Claim();
-                                $approvedClaims = $claimCheck->getClaimsByReportId($item['report_id']);
-                                $claimantInfo = null;
-                                
-                                foreach ($approvedClaims as $claim) {
-                                    if ($claim['status'] == 'approved' || $claim['status'] == 'completed') {
-                                        $claimantInfo = $claim;
-                                        break;
-                                    }
-                                }
-                                
-                                if ($claimantInfo): ?>
-                                    <div class="claimant-info" style="margin-top: 10px; padding: 10px; background: #e8f5e8; border-radius: 5px; border-left: 4px solid #28a745; text-align: center;">
-                                        <p style="margin: 0; font-size: 14px; color: #155724;">
-                                            <strong>Claimed by: <?php echo $claimantInfo['claimed_by']; ?></strong>
-                                        </p>
-                                    </div>
-                                <?php endif;
-                            }
+        <div class="item-details">
+            <h3><?php echo htmlspecialchars($item['category_name']); ?></h3>
+            
+            <div class="item-description">
+                <p><strong>Description:</strong> <?php echo htmlspecialchars($item['description']); ?></p>
+            </div>
+            
+            <p><strong>Location:</strong> <?php echo htmlspecialchars($item['location_name']); ?></p>
+            <p><strong>Date:</strong> <?php echo date('M j, Y', strtotime($item['created_at'])); ?></p>
+            <?php if ($item['report_type'] == 'lost' && !empty($item['date_lost'])): ?>
+                <p><strong>Date Lost:</strong> <?php echo date('M j, Y', strtotime($item['date_lost'])); ?></p>
+            <?php elseif ($item['report_type'] == 'found' && !empty($item['date_found'])): ?>
+                <p><strong>Date Found:</strong> <?php echo date('M j, Y', strtotime($item['date_found'])); ?></p>
+            <?php endif; ?>
+        </div>
 
-                            // Also show claimant info for confirmed lost items that have claims
-                            if ($item['report_type'] == 'lost' && $item['status'] == 'confirmed') {
-                                $claimCheck = new Claim();
-                                $approvedClaims = $claimCheck->getClaimsByReportId($item['report_id']);
-                                $claimantInfo = null;
-                                
-                                foreach ($approvedClaims as $claim) {
-                                    if ($claim['status'] == 'approved') {
-                                        $claimantInfo = $claim;
-                                        break;
-                                    }
-                                }
-                                
-                                if ($claimantInfo): ?>
-                                    <div class="claimant-info" style="margin-top: 10px; padding: 10px; background: #fff3cd; border-radius: 5px; border-left: 4px solid #ffc107;">
-                                        <p style="margin: 0; font-size: 14px; color: #856404;">
-                                            <strong>⏳ Claimed by: <?php echo $claimantInfo['claimed_by']; ?></strong>
-                                            <br><small>Waiting for owner confirmation</small>
-                                            <?php if (!empty($claimantInfo['claim_description'])): ?>
-                                                <br><em>"<?php echo substr($claimantInfo['claim_description'], 0, 80); ?><?php echo strlen($claimantInfo['claim_description']) > 80 ? '...' : ''; ?>"</em>
-                                            <?php endif; ?>
-                                        </p>
-                                    </div>
-                                <?php endif;
-                            }
-                            ?>
-                        </div>
+        <?php 
+        // Check if this item can be claimed
+        $canBeClaimed = false;
+        $claimMessage = '';
+        
+        if ($item['report_type'] == 'found' && $item['user_id'] != $current_user_id) {
+            if ($item['status'] == 'returned') {
+                $claimMessage = 'This item has been returned to its owner';
+            } else {
+                // Check if there are any approved claims for this report
+                $claimCheck = new Claim();
+                $existingClaims = $claimCheck->getClaimsByReportId($item['report_id']);
+                
+                $hasApprovedClaim = false;
+                $userHasPendingClaim = false;
+                
+                foreach ($existingClaims as $existingClaim) {
+                    if ($existingClaim['status'] == 'approved' || $existingClaim['status'] == 'completed') {
+                        $hasApprovedClaim = true;
+                    }
+                    if ($existingClaim['claimed_by'] == $current_user_id) {
+                        if ($existingClaim['status'] == 'pending') {
+                            $userHasPendingClaim = true;
+                        } elseif ($existingClaim['status'] == 'approved') {
+                            $hasApprovedClaim = true;
+                        }
+                    }
+                }
+                
+                if ($hasApprovedClaim) {
+                    $claimMessage = 'This item has an approved claim';
+                } elseif ($userHasPendingClaim) {
+                    $claimMessage = 'You have already submitted a claim for this item';
+                } else {
+                    $canBeClaimed = true;
+                }
+            }
+        }
+        ?>
+        
+        <div class="claim-section">
+            <?php if ($item['report_type'] == 'found' && $item['user_id'] != $current_user_id): ?>
+                <?php if ($canBeClaimed): ?>
+                    <button class="btn btn-claim" onclick="toggleClaimForm('<?php echo $item['report_id']; ?>')">
+                        Claim This Item
+                    </button>
+                    
+                    <div id="claim-form-<?php echo $item['report_id']; ?>" class="claim-form" style="display: none;">
+                        <form action="" method="POST">
+                            <input type="hidden" name="action" value="submit_claim">
+                            <input type="hidden" name="report_id" value="<?php echo $item['report_id']; ?>">
+                            <label for="claim_description_<?php echo $item['report_id']; ?>">
+                                Why do you think this is your item?
+                            </label>
+                            <textarea id="claim_description_<?php echo $item['report_id']; ?>" 
+                                      name="claim_description" 
+                                      required 
+                                      placeholder="Please provide details to support your claim (e.g., distinctive features, when/where you lost it, etc.)"></textarea>
+                            <button type="submit" class="btn btn-primary">Submit Claim</button>
+                            <button type="button" class="btn btn-secondary" onclick="toggleClaimForm('<?php echo $item['report_id']; ?>')">Cancel</button>
+                        </form>
                     </div>
-                <?php endforeach; ?>
+                <?php else: ?>
+                    <div class="claim-message">
+                        <?php echo $claimMessage; ?>
+                    </div>
+                <?php endif; ?>
+            <?php endif; ?>
+            
+            <?php if ($item['report_type'] == 'lost' && $item['user_id'] != $current_user_id && $item['status'] != 'returned'): ?>
+                <div class="found-item-section">
+                    <a href="<?php echo htmlspecialchars($_SERVER['PHP_SELF']); ?>?tab=report-item&found_lost_item=1&report_id=<?php echo $item['report_id']; ?>" 
+                       class="btn btn-found-item">
+                        I Found This Item
+                    </a>
+                    <small>Click to report this item as found</small>
+                </div>
+            <?php endif; ?>
+            
+            <?php
+            // Display claimant information for returned found items
+            if ($item['report_type'] == 'found' && $item['status'] == 'returned') {
+                $claimCheck = new Claim();
+                $approvedClaims = $claimCheck->getClaimsByReportId($item['report_id']);
+                $claimantInfo = null;
+                
+                foreach ($approvedClaims as $claim) {
+                    if ($claim['status'] == 'approved' || $claim['status'] == 'completed') {
+                        $claimantInfo = $claim;
+                        break;
+                    }
+                }
+                
+                if ($claimantInfo): ?>
+                    <div class="claimant-info" style="margin-top: 10px; padding: 10px; background: #e8f5e8; border-radius: 5px; border-left: 4px solid #28a745;">
+                        <p style="margin: 0; font-size: 14px; color: #155724;">
+                            <strong>Claimed by: <?php echo $claimantInfo['claimed_by']; ?></strong>
+                        </p>
+                    </div>
+                <?php endif;
+            }
+            ?>
+        </div>
+    </div>
+<?php endforeach; ?>
             <?php endif; ?>
         </div>
     </div>
@@ -1486,7 +1512,12 @@ if ($isAdmin) {
         $userReports = $report->getReportsByUser($current_user_id);
         
         if (empty($userReports)): ?>
-            <div class="no-items">You haven't reported any items yet.</div>
+            <div class="no-items" style="text-align: center; padding: 40px; color: #666; font-style: italic;">
+                <div class="no-items-icon">📭</div>
+                <h4>No Reports Yet</h4>
+                <p>You haven't reported any items yet.</p>
+                <a href="?tab=report-item" class="btn" style="margin-top: 15px;">Report Your First Item</a>
+            </div>
         <?php else: ?>
             <div class="items-grid">
                 <?php foreach ($userReports as $report): ?>
@@ -1498,74 +1529,60 @@ if ($isAdmin) {
                             <span class="item-status status-<?php echo $report['status']; ?>">
                                 <?php echo ucfirst($report['status']); ?>
                             </span>
-                            <span class="report-id">Report ID: <?php echo $report['report_id']; ?></span>
+                            <span class="report-id" style="font-size: 12px; color: #666; font-family: monospace;">
+                                ID: <?php echo $report['report_id']; ?>
+                            </span>
                         </div>
                         
-                        <div class="item-actions">
-    <?php if ($report['status'] == 'pending' || $report['status'] == 'found'): ?>
-        <a href="?tab=edit-report&id=<?php echo $report['report_id']; ?>" class="btn btn-sm btn-primary">Edit</a>
-    <?php endif; ?>
-    
-    <?php if ($report['status'] == 'pending'): ?>
-        <form action="" method="POST" style="display: inline;">
-            <input type="hidden" name="action" value="delete_report">
-            <input type="hidden" name="report_id" value="<?php echo $report['report_id']; ?>">
-            <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this report?')">Delete</button>
-        </form>
-    <?php endif; ?>
-    
-    <?php if ($report['report_type'] == 'lost' && $report['status'] == 'confirmed'): ?>
-        <?php
-        // Check if there's an approved claim
-        $hasApprovedClaim = false;
-        if (!empty($report['claims'])) {
-            foreach ($report['claims'] as $claim) {
-                if ($claim['status'] == 'approved') {
-                    $hasApprovedClaim = true;
-                    break;
-                }
-            }
-        }
-        ?>
-        <?php if ($hasApprovedClaim): ?>
-            <form action="" method="POST" style="display: inline;">
-                <input type="hidden" name="action" value="confirm_return">
-                <input type="hidden" name="report_id" value="<?php echo $report['report_id']; ?>">
-                <button type="submit" class="btn btn-sm btn-success" onclick="return confirm('Confirm that you have received your lost item?')">Confirm Return</button>
-            </form>
-        <?php endif; ?>
-    <?php endif; ?>
-</div>
+                        <!-- Image Container -->
+                        <div class="report-images-container" style="margin: 15px 0;">
+                            <?php if (!empty($report['images'])): ?>
+                                <div class="image-thumbnails" style="display: flex; gap: 10px; flex-wrap: wrap;">
+                                    <?php foreach ($report['images'] as $index => $image): ?>
+                                        <div class="image-thumb" style="width: 100px; height: 100px; border-radius: 8px; overflow: hidden; border: 2px solid #e9ecef; position: relative; cursor: pointer; background: #f8f9fa;">
+                                            <img src="<?php echo $image['image_path']; ?>" 
+                                                 alt="Item Image <?php echo $index + 1; ?>" 
+                                                 style="width: 100%; height: 100%; object-fit: cover;"
+                                                 onclick="openImageModal('<?php echo $image['image_path']; ?>', '<?php echo htmlspecialchars(addslashes($report['description'])); ?>')">
+                                            <?php if (count($report['images']) > 1): ?>
+                                                <div style="position: absolute; bottom: 0; right: 0; background: rgba(0,0,0,0.7); color: white; font-size: 10px; padding: 2px 5px; border-radius: 4px 0 0 0;">
+                                                    <?php echo $index + 1; ?>
+                                                </div>
+                                            <?php endif; ?>
+                                        </div>
+                                    <?php endforeach; ?>
+                                </div>
+                            <?php else: ?>
+                                <div class="no-images" style="text-align: center; padding: 20px; background: #f8f9fa; border-radius: 8px; border: 2px dashed #dee2e6;">
+                                    <div style="font-size: 36px; color: #adb5bd; margin-bottom: 10px;">📷</div>
+                                    <p style="margin: 0; color: #6c757d; font-style: italic;">No images uploaded</p>
+                                </div>
+                            <?php endif; ?>
+                        </div>
                         
+                        <!-- Item Details -->
                         <div class="item-details">
                             <h3><?php echo $report['category_name']; ?></h3>
-                            <p><strong>Description:</strong> <?php echo $report['description']; ?></p>
-                            <p><strong>Location:</strong> <?php echo $report['location_name']; ?></p>
+                            <p><strong>Description:</strong> <?php echo htmlspecialchars($report['description']); ?></p>
+                            <p><strong>Location:</strong> <?php echo htmlspecialchars($report['location_name']); ?></p>
                             <p><strong>Reported:</strong> <?php echo date('M j, Y g:i A', strtotime($report['created_at'])); ?></p>
                             <p><strong>Last Updated:</strong> <?php echo date('M j, Y g:i A', strtotime($report['updated_at'])); ?></p>
                             
-                            <?php if (!empty($report['images'])): ?>
-                                <div class="report-images">
-                                    <strong>Images:</strong>
-                                    <div class="image-thumbnails">
-                                        <?php foreach ($report['images'] as $image): ?>
-                                            <div class="image-thumb">
-                                                <img src="<?php echo $image['image_path']; ?>" alt="Item Image" 
-                                                     onclick="openImageModal('<?php echo $image['image_path']; ?>', '<?php echo $report['description']; ?>')">
-                                            </div>
-                                        <?php endforeach; ?>
-                                    </div>
-                                </div>
+                            <!-- Display appropriate date based on report type -->
+                            <?php if ($report['report_type'] == 'lost' && !empty($report['date_lost'])): ?>
+                                <p><strong>Date Lost:</strong> <?php echo date('M j, Y', strtotime($report['date_lost'])); ?></p>
+                            <?php elseif ($report['report_type'] == 'found' && !empty($report['date_found'])): ?>
+                                <p><strong>Date Found:</strong> <?php echo date('M j, Y', strtotime($report['date_found'])); ?></p>
                             <?php endif; ?>
                             
                             <?php if ($report['report_type'] == 'lost' && !empty($report['claims'])): ?>
-                                <div class="claims-section">
-                                    <h4>Claims on this item:</h4>
+                                <div class="claims-section" style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee;">
+                                    <h4 style="margin-bottom: 10px; font-size: 16px; color: #2c3e50;">Claims on this item:</h4>
                                     <?php foreach ($report['claims'] as $claim): ?>
                                         <div class="claim-item" style="background: #f8f9fa; padding: 10px; margin: 5px 0; border-radius: 5px;">
-                                            <p><strong>Claim ID:</strong> <?php echo $claim['claim_id']; ?></p>
-                                            <p><strong>Status:</strong> 
-                                                <span style="padding: 2px 6px; border-radius: 8px; font-size: 11px; 
+                                            <p style="margin: 0 0 5px 0;"><strong>Claim ID:</strong> <?php echo $claim['claim_id']; ?></p>
+                                            <p style="margin: 0 0 5px 0;"><strong>Status:</strong> 
+                                                <span style="padding: 2px 8px; border-radius: 12px; font-size: 12px; font-weight: bold;
                                                     background: <?php 
                                                         if ($claim['status'] == 'approved') echo '#d4edda'; 
                                                         elseif ($claim['status'] == 'rejected') echo '#f8d7da';
@@ -1579,21 +1596,191 @@ if ($isAdmin) {
                                                     <?php echo ucfirst($claim['status']); ?>
                                                 </span>
                                             </p>
-                                            <p><strong>Claim Description:</strong> <?php echo $claim['claim_description']; ?></p>
+                                            <p style="margin: 0 0 5px 0;"><strong>Claim Description:</strong> <?php echo htmlspecialchars($claim['claim_description']); ?></p>
                                             <?php if (!empty($claim['admin_notes'])): ?>
-                                                <p><strong>Admin Notes:</strong> <?php echo $claim['admin_notes']; ?></p>
+                                                <p style="margin: 0;"><strong>Admin Notes:</strong> <?php echo htmlspecialchars($claim['admin_notes']); ?></p>
                                             <?php endif; ?>
                                         </div>
                                     <?php endforeach; ?>
                                 </div>
                             <?php endif; ?>
+                        </div>
+                        
+                        <!-- Action Buttons -->
+                        <div class="item-actions" style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee; display: flex; gap: 10px; flex-wrap: wrap;">
+                            <?php if (in_array($report['status'], ['pending', 'found', 'confirmed'])): ?>
+                                <a href="?tab=edit-report&id=<?php echo $report['report_id']; ?>" class="btn btn-sm btn-primary">Edit</a>
+                            <?php endif; ?>
                             
+                            <?php if (in_array($report['status'], ['pending', 'confirmed'])): ?>
+                                <form action="" method="POST" style="margin: 0; display: inline;">
+                                    <input type="hidden" name="action" value="delete_report">
+                                    <input type="hidden" name="report_id" value="<?php echo $report['report_id']; ?>">
+                                    <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this report?')">Delete</button>
+                                </form>
+                            <?php endif; ?>
+                            
+                            <?php if ($report['report_type'] == 'lost' && $report['status'] == 'confirmed'): ?>
+                                <?php
+                                // Check if there's an approved claim
+                                $hasApprovedClaim = false;
+                                if (!empty($report['claims'])) {
+                                    foreach ($report['claims'] as $claim) {
+                                        if ($claim['status'] == 'approved') {
+                                            $hasApprovedClaim = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                                ?>
+                                <?php if ($hasApprovedClaim): ?>
+                                    <form action="" method="POST" style="margin: 0; display: inline;">
+                                        <input type="hidden" name="action" value="confirm_return">
+                                        <input type="hidden" name="report_id" value="<?php echo $report['report_id']; ?>">
+                                        <button type="submit" class="btn btn-sm btn-success" onclick="return confirm('Confirm that you have received your lost item?')">Confirm Return</button>
+                                    </form>
+                                <?php endif; ?>
+                            <?php endif; ?>
+                            
+                            <?php if ($report['report_type'] == 'found' && $report['status'] == 'confirmed'): ?>
+                                <?php
+                                // Check if current user has an approved claim for this found item
+                                $hasApprovedClaim = false;
+                                if (!empty($report['claims'])) {
+                                    foreach ($report['claims'] as $claim) {
+                                        if ($claim['status'] == 'approved' && $claim['claimed_by'] == $current_user_id) {
+                                            $hasApprovedClaim = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                                ?>
+                                <?php if ($hasApprovedClaim): ?>
+                                    <form action="" method="POST" style="margin: 0; display: inline;">
+                                        <input type="hidden" name="action" value="confirm_found_return">
+                                        <input type="hidden" name="report_id" value="<?php echo $report['report_id']; ?>">
+                                        <button type="submit" class="btn btn-sm btn-success" onclick="return confirm('Confirm that you have received the found item?')">Confirm Return</button>
+                                    </form>
+                                <?php endif; ?>
+                            <?php endif; ?>
+                            
+                            <!-- "Mark as Found" button for lost items -->
+                            <?php if ($report['report_type'] == 'lost' && in_array($report['status'], ['pending', 'confirmed'])): ?>
+                                <form action="" method="POST" style="margin: 0; display: inline;">
+                                    <input type="hidden" name="action" value="mark_as_found">
+                                    <input type="hidden" name="report_id" value="<?php echo $report['report_id']; ?>">
+                                    <button type="submit" class="btn btn-sm btn-success" onclick="return confirm('Mark this lost item as found? This will update its status to returned.')">Mark as Found</button>
+                                </form>
+                            <?php endif; ?>
                         </div>
                     </div>
                 <?php endforeach; ?>
             </div>
         <?php endif; ?>
     </div>
+    <?php if ($report['report_type'] == 'lost' && !empty($report['claims'])): ?>
+    <div class="claims-section">
+        <h4>Claims on this item:</h4>
+        <?php foreach ($report['claims'] as $claim): ?>
+            <div class="claim-item" style="background: #f8f9fa; padding: 10px; margin: 5px 0; border-radius: 5px;">
+                <p><strong>Claim ID:</strong> <?php echo $claim['claim_id']; ?></p>
+                <p><strong>Status:</strong> 
+                    <span style="padding: 2px 6px; border-radius: 8px; font-size: 11px; 
+                                background: <?php 
+                                    if ($claim['status'] == 'approved') echo '#d4edda'; 
+                                    elseif ($claim['status'] == 'rejected') echo '#f8d7da';
+                                    else echo '#fff3cd';
+                                ?>; 
+                                color: <?php 
+                                    if ($claim['status'] == 'approved') echo '#155724'; 
+                                    elseif ($claim['status'] == 'rejected') echo '#721c24';
+                                    else echo '#856404';
+                                ?>;">
+                                <?php echo ucfirst($claim['status']); ?>
+                     </span>
+                </p>
+                    <p><strong>Claim Description:</strong> <?php echo $claim['claim_description']; ?></p>
+                        <?php if (!empty($claim['admin_notes'])): ?>
+                            <p><strong>Admin Notes:</strong> <?php echo $claim['admin_notes']; ?></p>
+                        <?php endif; ?>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+        <?php endif; ?>
+    </div>
+</div>
+                        
+    <?php if ($report['report_type'] == 'found' && $report['status'] == 'confirmed'): ?>
+        <?php
+        // Check if current user has an approved claim for this found item
+        $hasApprovedClaim = false;
+        if (!empty($report['claims'])) {
+        foreach ($report['claims'] as $claim) {
+            if ($claim['status'] == 'approved' && $claim['claimed_by'] == $current_user_id) {
+                $hasApprovedClaim = true;
+                break;
+            }
+        }
+    }
+    ?>
+    <?php if ($hasApprovedClaim): ?>
+        <form action="" method="POST" style="display: inline;">
+            <input type="hidden" name="action" value="confirm_found_return">
+            <input type="hidden" name="report_id" value="<?php echo $report['report_id']; ?>">
+            <button type="submit" class="btn btn-sm btn-success" onclick="return confirm('Confirm that you have received the found item?')">Confirm Return</button>
+        </form>
+    <?php endif; ?>
+<?php endif; ?>
+</div>
+                        
+    <div class="item-details">
+       <?php if (!empty($report['images'])): ?>
+                <div class="report-images">
+                    <strong>Images:</strong>
+                        <div class="image-thumbnails">
+                            <?php foreach ($report['images'] as $image): ?>
+                                <div class="image-thumb">
+                                        <img src="<?php echo $image['image_path']; ?>" alt="Item Image" 
+                                                     onclick="openImageModal('<?php echo $image['image_path']; ?>', '<?php echo $report['description']; ?>')">
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+        <?php endif; ?>
+                            
+        <?php if ($report['report_type'] == 'lost' && !empty($report['claims'])): ?>
+            <div class="claims-section">
+                <h4>Claims on this item:</h4>
+                    <?php foreach ($report['claims'] as $claim): ?>
+                        <div class="claim-item" style="background: #f8f9fa; padding: 10px; margin: 5px 0; border-radius: 5px;">
+                            <p><strong>Claim ID:</strong> <?php echo $claim['claim_id']; ?></p>
+                                <p><strong>Status:</strong> 
+                                    <span style="padding: 2px 6px; border-radius: 8px; font-size: 11px; 
+                                                    background: <?php 
+                                                        if ($claim['status'] == 'approved') echo '#d4edda'; 
+                                                        elseif ($claim['status'] == 'rejected') echo '#f8d7da';
+                                                        else echo '#fff3cd';
+                                                    ?>; 
+                                                    color: <?php 
+                                                        if ($claim['status'] == 'approved') echo '#155724'; 
+                                                        elseif ($claim['status'] == 'rejected') echo '#721c24';
+                                                        else echo '#856404';
+                                                    ?>;">
+                                                    <?php echo ucfirst($claim['status']); ?>
+                                    </span>
+                                </p>
+                                <p><strong>Claim Description:</strong> <?php echo $claim['claim_description']; ?></p>
+                                    <?php if (!empty($claim['admin_notes'])): ?>
+                                        <p><strong>Admin Notes:</strong> <?php echo $claim['admin_notes']; ?></p>
+                                    <?php endif; ?>
+                            </div>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>            
+            </div>
+        </div>                
+    </div>
+</div>
 <?php elseif ($active_tab == 'notifications'): ?>
     <div class="notifications-section">
         <div class="notifications-header">
@@ -1664,8 +1851,8 @@ if ($isAdmin) {
         // Check if report exists and belongs to current user
         if (!$reportDetails || $reportDetails['user_id'] != $current_user_id) {
             echo '<div class="notification error">Report not found or you do not have permission to edit it.</div>';
-        } elseif ($reportDetails['status'] == 'returned' || $reportDetails['status'] == 'confirmed') {
-            echo '<div class="notification error">Cannot edit report that has been ' . $reportDetails['status'] . '.</div>';
+        } elseif ($reportDetails['status'] == 'returned') {
+        echo '<div class="notification error">Cannot edit report that has been returned.</div>';
         } else {
             $itemDetails = $item->getItemById($reportDetails['item_id']);
             $itemImages = $item->getItemImages($reportDetails['item_id']);
@@ -1713,26 +1900,36 @@ if ($isAdmin) {
                 <div class="form-group">
                     <label>Current Images</label>
                     <?php if (!empty($itemImages)): ?>
-                        <div class="current-images">
-                            <?php foreach ($itemImages as $image): ?>
-                                <div class="image-item">
-                                    <img src="<?php echo $image['image_path']; ?>" alt="Current Image">
-                                    <label class="delete-checkbox">
-                                        <input type="checkbox" name="delete_images[]" value="<?php echo $image['image_id']; ?>">
-                                        Delete
-                                    </label>
-                                </div>
-                            <?php endforeach; ?>
+                        <div class="current-images" style="margin-bottom: 20px;">
+                            <div class="image-previews" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 15px;">
+                                <?php foreach ($itemImages as $image): ?>
+                                    <div class="image-preview-item existing-image" style="position: relative; border: 2px solid #e9ecef; border-radius: 8px; overflow: hidden; background: #f8f9fa; display: flex; align-items: center; justify-content: center;">
+                                        <img src="<?php echo $image['image_path']; ?>" alt="Current Image" style="max-width: 100%; max-height: 100%; object-fit: contain;">
+                                        <div style="position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.7); color: white; padding: 4px; font-size: 10px; text-align: center;">
+                                            <label class="delete-checkbox" style="color: white; margin: 0; font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px;">
+                                                <input type="checkbox" name="delete_images[]" value="<?php echo $image['image_id']; ?>">
+                                                Delete
+                                            </label>
+                                        </div>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
                         </div>
                     <?php else: ?>
-                        <p>No images uploaded</p>
+                        <p style="color: #6c757d; font-style: italic;">No images uploaded</p>
                     <?php endif; ?>
                 </div>
                 
                 <div class="form-group">
                     <label for="new_images">Add New Images (Optional)</label>
-                    <input type="file" id="new_images" name="new_images[]" multiple accept="image/*">
-                    <small>You can select multiple images to add</small>
+                    <input type="file" id="new_images" name="new_images[]" multiple accept="image/*" onchange="previewImages(event, 'new')">
+                    <small>You can select multiple images to add. Max file size: 2MB each. Supported formats: JPG, PNG, GIF</small>
+                    
+                    <!-- Image preview container for new images -->
+                    <div id="new-image-preview-container" class="image-preview-container" style="margin-top: 15px; display: none;">
+                        <h4 style="margin-bottom: 10px; font-size: 16px; color: #495057;">New Images:</h4>
+                        <div id="new-image-previews" class="image-previews" style="display: flex; flex-wrap: wrap; gap: 10px;"></div>
+                    </div>
                 </div>
                 
                 <div class="form-actions">
@@ -1810,7 +2007,6 @@ if ($isAdmin) {
                                         <td class="description-cell"><?php echo htmlspecialchars($reportItem['description']); ?></td>
                                         <td><?php echo $reportItem['category_name']; ?></td>
                                         <td><?php echo htmlspecialchars($reportItem['location_name']); ?></td>
-                                        <td><?php echo htmlspecialchars($reportItem['username']); ?></td>
                                         <td>
                                             <span class="item-status status-<?php echo $reportItem['status']; ?>">
                                                 <?php echo ucfirst($reportItem['status']); ?>
@@ -1880,13 +2076,11 @@ if ($isAdmin) {
                                         <h4><?php echo htmlspecialchars($claimItem['item_description']); ?></h4>
                                         <div class="claim-meta">
                                             <span class="meta-item">
-                                                <strong>Claimant:</strong> 
-                                                <?php echo htmlspecialchars($claimItem['claimant_username']); ?>
+                                                <strong>Claimant:</strong>
                                                 (<?php echo htmlspecialchars($claimItem['claimant_email']); ?>)
                                             </span>
                                             <span class="meta-item">
                                                 <strong>Reporter:</strong> 
-                                                <?php echo htmlspecialchars($claimItem['reporter_username']); ?>
                                             </span>
                                         </div>
                                     </div>
@@ -2166,7 +2360,6 @@ if ($isAdmin) {
                             round(($reporter['returned_count'] / $reporter['report_count']) * 100, 1) : 0;
                     ?>
                         <div class="reporter-item">
-                            <span class="reporter-name"><?php echo $reporter['username']; ?></span>
                             <span class="reporter-stats">
                                 <?php echo $reporter['report_count']; ?> reports • 
                                 <?php echo $reporter['returned_count']; ?> returned • 
@@ -2230,9 +2423,6 @@ if ($isAdmin) {
             </button>
             <button type="button" onclick="generateReport('csv')" style="padding: 12px 25px; background: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 15px; font-weight: 500;">
                 Download CSV
-            </button>
-            <button type="button" onclick="generateReport('pdf')" style="padding: 12px 25px; background: #dc3545; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 15px; font-weight: 500;">
-                Download PDF
             </button>
         </div>
     </form>
@@ -2491,83 +2681,171 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
-// Image modal functionality
+// Enhanced image modal with gallery navigation
+let currentImageIndex = 0;
+let currentImages = [];
+
 function openImageModal(imageSrc, description) {
-    // Create modal overlay
+    // Get all images for this report
+    const reportImages = document.querySelectorAll('.report-images-container .image-thumb img');
+    currentImages = Array.from(reportImages).map(img => img.src);
+    
+    // Find the clicked image index
+    currentImageIndex = currentImages.findIndex(src => src === imageSrc);
+    
+    // Create modal
     const modalOverlay = document.createElement('div');
+    modalOverlay.className = 'image-modal active';
     modalOverlay.style.cssText = `
         position: fixed;
         top: 0;
         left: 0;
         width: 100%;
         height: 100%;
-        background: rgba(0,0,0,0.8);
+        background: rgba(0,0,0,0.9);
+        z-index: 1000;
         display: flex;
         justify-content: center;
         align-items: center;
-        z-index: 1000;
-        cursor: pointer;
     `;
+    
+    // Create gallery container
+    const galleryContainer = document.createElement('div');
+    galleryContainer.className = 'image-gallery';
+    
+    // Create navigation buttons
+    const prevButton = document.createElement('button');
+    prevButton.className = 'gallery-nav';
+    prevButton.innerHTML = '←';
+    prevButton.onclick = showPrevImage;
+    prevButton.disabled = currentImages.length <= 1;
+    
+    const nextButton = document.createElement('button');
+    nextButton.className = 'gallery-nav';
+    nextButton.innerHTML = '→';
+    nextButton.onclick = showNextImage;
+    nextButton.disabled = currentImages.length <= 1;
     
     // Create modal content
     const modalContent = document.createElement('div');
+    modalContent.className = 'image-modal-content';
     modalContent.style.cssText = `
+        position: relative;
         max-width: 90%;
         max-height: 90%;
-        position: relative;
     `;
     
     // Create image
     const modalImage = document.createElement('img');
+    modalImage.className = 'image-modal-img';
     modalImage.src = imageSrc;
     modalImage.alt = description;
-    modalImage.style.cssText = `
-        max-width: 100%;
-        max-height: 80vh;
-        border-radius: 8px;
-    `;
     
     // Create close button
     const closeButton = document.createElement('button');
+    closeButton.className = 'image-modal-close';
     closeButton.innerHTML = '×';
-    closeButton.style.cssText = `
-        position: absolute;
-        top: -40px;
-        right: -40px;
-        background: #fff;
-        border: none;
-        border-radius: 50%;
-        width: 30px;
-        height: 30px;
-        font-size: 20px;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    `;
+    closeButton.onclick = closeModal;
     
-    // Close modal function
-    function closeModal() {
-        document.body.removeChild(modalOverlay);
-        document.body.style.overflow = 'auto';
-    }
+    // Create description
+    const descElement = document.createElement('div');
+    descElement.className = 'image-modal-description';
+    descElement.textContent = description;
     
-    // Event listeners
-    modalOverlay.addEventListener('click', closeModal);
-    closeButton.addEventListener('click', closeModal);
-    modalContent.addEventListener('click', function(e) {
-        e.stopPropagation();
-    });
+    // Create image counter
+    const counterElement = document.createElement('div');
+    counterElement.className = 'gallery-counter';
+    counterElement.textContent = `${currentImageIndex + 1} / ${currentImages.length}`;
     
     // Assemble modal
     modalContent.appendChild(modalImage);
     modalContent.appendChild(closeButton);
-    modalOverlay.appendChild(modalContent);
+    modalContent.appendChild(counterElement);
+    
+    galleryContainer.appendChild(prevButton);
+    galleryContainer.appendChild(modalContent);
+    galleryContainer.appendChild(nextButton);
+    modalOverlay.appendChild(galleryContainer);
+    
+    if (description) {
+        modalOverlay.appendChild(descElement);
+    }
     
     // Add to page
     document.body.style.overflow = 'hidden';
     document.body.appendChild(modalOverlay);
+    
+    // Add keyboard navigation
+    document.addEventListener('keydown', handleKeyboardNavigation);
 }
+
+function showPrevImage() {
+    if (currentImages.length <= 1) return;
+    
+    currentImageIndex = (currentImageIndex - 1 + currentImages.length) % currentImages.length;
+    updateModalImage();
+}
+
+function showNextImage() {
+    if (currentImages.length <= 1) return;
+    
+    currentImageIndex = (currentImageIndex + 1) % currentImages.length;
+    updateModalImage();
+}
+
+function updateModalImage() {
+    const modalImg = document.querySelector('.image-modal-img');
+    const counter = document.querySelector('.gallery-counter');
+    
+    if (modalImg && counter) {
+        modalImg.src = currentImages[currentImageIndex];
+        counter.textContent = `${currentImageIndex + 1} / ${currentImages.length}`;
+        
+        // Add fade effect
+        modalImg.style.opacity = '0';
+        setTimeout(() => {
+            modalImg.style.opacity = '1';
+            modalImg.style.transition = 'opacity 0.3s ease';
+        }, 50);
+    }
+}
+
+function handleKeyboardNavigation(e) {
+    const modal = document.querySelector('.image-modal.active');
+    if (!modal) return;
+    
+    switch(e.key) {
+        case 'ArrowLeft':
+            e.preventDefault();
+            showPrevImage();
+            break;
+        case 'ArrowRight':
+            e.preventDefault();
+            showNextImage();
+            break;
+        case 'Escape':
+            e.preventDefault();
+            closeModal();
+            break;
+    }
+}
+
+function closeModal() {
+    const modal = document.querySelector('.image-modal.active');
+    if (modal) {
+        document.body.removeChild(modal);
+        document.body.style.overflow = 'auto';
+        document.removeEventListener('keydown', handleKeyboardNavigation);
+    }
+}
+
+// Close modal when clicking outside image
+document.addEventListener('click', function(e) {
+    const modal = document.querySelector('.image-modal.active');
+    if (modal && e.target === modal) {
+        closeModal();
+    }
+});
 
 // Fallback initialization for admin tabs
 if (document.querySelector('.admin-section') && typeof initAdminTabs === 'function') {
@@ -2735,6 +3013,254 @@ document.addEventListener('DOMContentLoaded', function() {
     const today = new Date().toISOString().split('T')[0];
     document.getElementById('end_date').max = today;
     document.getElementById('start_date').max = today;
+});
+
+// Image preview functionality
+function previewImages(event, type = 'report') {
+    const files = event.target.files;
+    const previewContainer = type === 'new' ? 
+        document.getElementById('new-image-preview-container') : 
+        document.getElementById('image-preview-container');
+    const previewsDiv = type === 'new' ? 
+        document.getElementById('new-image-previews') : 
+        document.getElementById('image-previews');
+    
+    // Clear previous previews
+    previewsDiv.innerHTML = '';
+    
+    if (files.length === 0) {
+        previewContainer.style.display = 'none';
+        return;
+    }
+    
+    // Show preview container
+    previewContainer.style.display = 'block';
+    
+    // Process each file
+    for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        
+        // Validate file type
+        if (!file.type.match('image.*')) {
+            alert(`File "${file.name}" is not an image. Please select image files only.`);
+            continue;
+        }
+        
+        // Validate file size (2MB = 2 * 1024 * 1024 bytes)
+        if (file.size > 2 * 1024 * 1024) {
+            alert(`File "${file.name}" is too large. Maximum size is 2MB.`);
+            continue;
+        }
+        
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const previewDiv = document.createElement('div');
+            previewDiv.className = 'image-preview-item';
+            previewDiv.style.cssText = `
+                position: relative;
+                width: 120px;
+                height: 120px;
+                border-radius: 8px;
+                overflow: hidden;
+                border: 2px solid #e9ecef;
+                background: #f8f9fa;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            `;
+            
+            const img = document.createElement('img');
+            img.src = e.target.result;
+            img.style.cssText = `
+                max-width: 100%;
+                max-height: 100%;
+                object-fit: contain;
+            `;
+            img.alt = `Preview ${i + 1}`;
+            
+            const removeBtn = document.createElement('button');
+            removeBtn.type = 'button';
+            removeBtn.innerHTML = '×';
+            removeBtn.style.cssText = `
+                position: absolute;
+                top: 5px;
+                right: 5px;
+                background: #dc3545;
+                color: white;
+                border: none;
+                border-radius: 50%;
+                width: 24px;
+                height: 24px;
+                font-size: 16px;
+                font-weight: bold;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                line-height: 1;
+                padding: 0;
+            `;
+            removeBtn.onclick = function() {
+                removeImagePreview(file.name, event.target, previewDiv, type);
+            };
+            
+            // File info overlay
+            const fileInfo = document.createElement('div');
+            fileInfo.style.cssText = `
+                position: absolute;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                background: rgba(0,0,0,0.7);
+                color: white;
+                padding: 4px;
+                font-size: 10px;
+                text-align: center;
+            `;
+            fileInfo.textContent = `${file.name} (${formatFileSize(file.size)})`;
+            
+            previewDiv.appendChild(img);
+            previewDiv.appendChild(removeBtn);
+            previewDiv.appendChild(fileInfo);
+            previewsDiv.appendChild(previewDiv);
+        };
+        
+        reader.readAsDataURL(file);
+    }
+}
+
+// Remove image preview and update file input
+function removeImagePreview(fileName, fileInput, previewDiv, type) {
+    // Remove preview
+    previewDiv.remove();
+    
+    // Create a new FileList without the removed file
+    const dataTransfer = new DataTransfer();
+    const files = fileInput.files;
+    
+    for (let i = 0; i < files.length; i++) {
+        if (files[i].name !== fileName) {
+            dataTransfer.items.add(files[i]);
+        }
+    }
+    
+    // Update file input
+    fileInput.files = dataTransfer.files;
+    
+    // Trigger change event to update preview count
+    fileInput.dispatchEvent(new Event('change'));
+    
+    // Hide preview container if no images left
+    const previewContainer = type === 'new' ? 
+        document.getElementById('new-image-preview-container') : 
+        document.getElementById('image-preview-container');
+    const previewsDiv = type === 'new' ? 
+        document.getElementById('new-image-previews') : 
+        document.getElementById('image-previews');
+    
+    if (previewsDiv.children.length === 0) {
+        previewContainer.style.display = 'none';
+    }
+}
+
+// Format file size
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+// Drag and drop functionality
+function setupDragAndDrop() {
+    const dropAreas = document.querySelectorAll('input[type="file"]');
+    
+    dropAreas.forEach(dropArea => {
+        const parent = dropArea.parentElement;
+        
+        // Add drag and drop events
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            parent.addEventListener(eventName, preventDefaults, false);
+        });
+        
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+        
+        // Highlight drop area
+        ['dragenter', 'dragover'].forEach(eventName => {
+            parent.addEventListener(eventName, highlight, false);
+        });
+        
+        ['dragleave', 'drop'].forEach(eventName => {
+            parent.addEventListener(eventName, unhighlight, false);
+        });
+        
+        function highlight() {
+            parent.style.background = '#e8f4fd';
+            parent.style.border = '2px dashed #3498db';
+        }
+        
+        function unhighlight() {
+            parent.style.background = '';
+            parent.style.border = '';
+        }
+        
+        // Handle drop
+        parent.addEventListener('drop', handleDrop, false);
+        
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            
+            if (files.length) {
+                // Update file input
+                const dataTransfer = new DataTransfer();
+                const existingFiles = dropArea.files;
+                
+                // Keep existing files
+                for (let i = 0; i < existingFiles.length; i++) {
+                    dataTransfer.items.add(existingFiles[i]);
+                }
+                
+                // Add new files
+                for (let i = 0; i < files.length; i++) {
+                    if (files[i].type.match('image.*') && files[i].size <= 2 * 1024 * 1024) {
+                        dataTransfer.items.add(files[i]);
+                    } else {
+                        alert(`File "${files[i].name}" is not a valid image or exceeds 2MB limit.`);
+                    }
+                }
+                
+                dropArea.files = dataTransfer.files;
+                
+                // Trigger change event to show previews
+                dropArea.dispatchEvent(new Event('change'));
+            }
+        }
+    });
+}
+
+// Initialize when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    setupDragAndDrop();
+    
+    // Update file input labels to show count
+    const fileInputs = document.querySelectorAll('input[type="file"][multiple]');
+    fileInputs.forEach(input => {
+        input.addEventListener('change', function() {
+            const label = this.nextElementSibling;
+            if (label && label.tagName === 'SMALL') {
+                if (this.files.length > 0) {
+                    label.textContent = `${this.files.length} image(s) selected. Max file size: 2MB each. Supported formats: JPG, PNG, GIF`;
+                } else {
+                    label.textContent = 'You can select multiple images. Max file size: 2MB each. Supported formats: JPG, PNG, GIF';
+                }
+            }
+        });
+    });
 });
 </script>
 
