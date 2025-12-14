@@ -113,14 +113,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             <input type="hidden" name="action" value="register">
             
             <div class="form-group">
-                <label for="username">Username *</label>
+                <label for="username">Username <span style="color: red;">*</span></label>
                 <input type="text" id="username" name="username" required 
                        value="<?php echo isset($_POST['username']) ? $_POST['username'] : ''; ?>" 
                        placeholder="Choose a username">
             </div>
             
             <div class="form-group">
-                <label for="email">Email *</label>
+                <label for="email">Email <span style="color: red;">*</span></label>
                 <input type="email" id="email" name="email" required 
                        value="<?php echo isset($_POST['email']) ? $_POST['email'] : ''; ?>" 
                        placeholder="Enter your email">
@@ -134,13 +134,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             </div>
             
             <div class="form-group">
-                <label for="password">Password *</label>
+                <label for="password">Password <span style="color: red;">*</span></label>
                 <input type="password" id="password" name="password" required 
                        placeholder="Enter your password (min. 6 characters)">
             </div>
             
             <div class="form-group">
-                <label for="confirm_password">Confirm Password *</label>
+                <label for="confirm_password">Confirm Password <span style="color: red;">*</span></label>
                 <input type="password" id="confirm_password" name="confirm_password" required 
                        placeholder="Confirm your password">
             </div>

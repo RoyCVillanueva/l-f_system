@@ -1,6 +1,9 @@
 <?php
 session_start();
 
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
+
 // Redirect to login if not authenticated
 if (!isset($_SESSION['logged_in']) || !$_SESSION['logged_in']) {
     header('Location: login.php');
@@ -81,6 +84,11 @@ function sanitizeInput($input) {
         return array_map('sanitizeInput', $input);
     }
     return htmlspecialchars(trim($input), ENT_QUOTES, 'UTF-8');
+}
+
+function debug($data, $label = 'DEBUG') {
+    error_log("[$label] " . print_r($data, true));
+    echo "<!-- [$label] " . htmlspecialchars(print_r($data, true)) . " -->";
 }
 
 function handleMultipleFileUpload() {
@@ -1141,39 +1149,27 @@ if ($isAdmin) {
     <?php endif; ?>
     
     <!-- Main dashboard content -->
-  <div class="tabs" style="display: flex; gap: 5px; margin-bottom: 30px; background: #f8f9fa; padding: 10px; border-radius: 10px;">
-    <a href="?tab=browse-items" class="tab <?php echo $active_tab == 'browse-items' ? 'active' : ''; ?>" 
-       style="flex: 1; text-align: center; padding: 15px; background: <?php echo $active_tab == 'browse-items' ? '#007bff' : 'transparent'; ?>; 
-              color: <?php echo $active_tab == 'browse-items' ? 'white' : '#495057'; ?>; border-radius: 8px; font-weight: 600;">
+<div class="tabs-container">
+    <a href="?tab=browse-items" class="tab tab-browse-items <?php echo $active_tab == 'browse-items' ? 'active' : ''; ?>">
         Browse Items
     </a>
-    <a href="?tab=report-item" class="tab <?php echo $active_tab == 'report-item' ? 'active' : ''; ?>" 
-       style="flex: 1; text-align: center; padding: 15px; background: <?php echo $active_tab == 'report-item' ? '#28a745' : 'transparent'; ?>; 
-              color: <?php echo $active_tab == 'report-item' ? 'white' : '#495057'; ?>; border-radius: 8px; font-weight: 600;">
+    <a href="?tab=report-item" class="tab tab-report-item <?php echo $active_tab == 'report-item' ? 'active' : ''; ?>">
         Report Item
     </a>
-    <a href="?tab=my-reports" class="tab <?php echo $active_tab == 'my-reports' ? 'active' : ''; ?>" 
-       style="flex: 1; text-align: center; padding: 15px; background: <?php echo $active_tab == 'my-reports' ? '#ffc107' : 'transparent'; ?>; 
-              color: <?php echo $active_tab == 'my-reports' ? 'black' : '#495057'; ?>; border-radius: 8px; font-weight: 600;">
+    <a href="?tab=my-reports" class="tab tab-my-reports <?php echo $active_tab == 'my-reports' ? 'active' : ''; ?>">
         My Reports
     </a>
-    <a href="?tab=notifications" class="tab <?php echo $active_tab == 'notifications' ? 'active' : ''; ?>" 
-       style="flex: 1; text-align: center; padding: 15px; background: <?php echo $active_tab == 'notifications' ? '#17a2b8' : 'transparent'; ?>; 
-              color: <?php echo $active_tab == 'notifications' ? 'white' : '#495057'; ?>; border-radius: 8px; font-weight: 600;">
+    <a href="?tab=notifications" class="tab tab-notifications <?php echo $active_tab == 'notifications' ? 'active' : ''; ?>">
         Notifications
         <?php if ($unreadCount > 0): ?>
             <span class="tab-badge"><?php echo $unreadCount; ?></span>
         <?php endif; ?>
     </a>
     <?php if ($isAdmin): ?>
-        <a href="?tab=admin" class="tab <?php echo $active_tab == 'admin' ? 'active' : ''; ?>" 
-           style="flex: 1; text-align: center; padding: 15px; background: <?php echo $active_tab == 'admin' ? '#dc3545' : 'transparent'; ?>; 
-                  color: <?php echo $active_tab == 'admin' ? 'white' : '#495057'; ?>; border-radius: 8px; font-weight: 600;">
+        <a href="?tab=admin" class="tab tab-admin <?php echo $active_tab == 'admin' ? 'active' : ''; ?>">
             Admin
         </a>
-        <a href="?tab=statistics" class="tab <?php echo $active_tab == 'statistics' ? 'active' : ''; ?>" 
-           style="flex: 1; text-align: center; padding: 15px; background: <?php echo $active_tab == 'statistics' ? '#6f42c1' : 'transparent'; ?>; 
-                  color: <?php echo $active_tab == 'statistics' ? 'white' : '#495057'; ?>; border-radius: 8px; font-weight: 600;">
+        <a href="?tab=statistics" class="tab tab-statistics <?php echo $active_tab == 'statistics' ? 'active' : ''; ?>">
             Statistics
         </a>
     <?php endif; ?>
@@ -1625,12 +1621,27 @@ if ($isAdmin) {
     </div>
 
 <?php elseif ($active_tab == 'my-reports'): ?>
+    <?php
+    // DEBUG: Let's see what's happening
+    debug("Entering my-reports section", "MY-REPORTS");
+    
+    $reportObj = new Report();
+    debug($reportObj, "Report object");
+    
+    $userReports = $reportObj->getReportsByUser($current_user_id);
+    debug(gettype($userReports), "Type of userReports");
+    
+    if (!empty($userReports)) {
+        debug(count($userReports), "Number of reports");
+        $firstReport = reset($userReports);
+        debug(gettype($firstReport), "Type of first report");
+        debug($firstReport, "First report contents");
+    }
+    ?>
+    
     <div class="my-reports-section">
         <h2>My Reports</h2>
         <?php
-        $report = new Report();
-        $userReports = $report->getReportsByUser($current_user_id);
-        
         if (empty($userReports)): ?>
             <div class="no-items" style="text-align: center; padding: 40px; color: #666; font-style: italic;">
                 <div class="no-items-icon">📭</div>
@@ -1640,33 +1651,70 @@ if ($isAdmin) {
             </div>
         <?php else: ?>
             <div class="items-grid">
-                <?php foreach ($userReports as $report): ?>
+                <?php foreach ($userReports as $index => $reportItem): 
+                    debug("Processing report $index", "LOOP-$index");
+                    debug(gettype($reportItem), "Type of reportItem");
+                    
+                    // If it's an object, let's see what class
+                    if (is_object($reportItem)) {
+                        debug(get_class($reportItem), "Class of reportItem");
+                    }
+                ?>
                     <div class="item-card">
+                        <?php 
+                        // Test if we can access as array or object
+                        try {
+                            if (is_array($reportItem)) {
+                                $report_type = $reportItem['report_type'] ?? 'unknown';
+                                $status = $reportItem['status'] ?? 'unknown';
+                                $report_id = $reportItem['report_id'] ?? 'unknown';
+                            } elseif (is_object($reportItem)) {
+                                $report_type = $reportItem->report_type ?? $reportItem->report_type ?? 'unknown';
+                                $status = $reportItem->status ?? $reportItem->status ?? 'unknown';
+                                $report_id = $reportItem->report_id ?? $reportItem->report_id ?? 'unknown';
+                            } else {
+                                $report_type = 'unknown';
+                                $status = 'unknown';
+                                $report_id = 'unknown';
+                            }
+                        ?>
                         <div class="item-header">
-                            <span class="report-type-badge <?php echo $report['report_type']; ?>">
-                                <?php echo ucfirst($report['report_type']); ?>
+                            <span class="report-type-badge <?php echo $report_type; ?>">
+                                <?php echo ucfirst($report_type); ?>
                             </span>
-                            <span class="item-status status-<?php echo $report['status']; ?>">
-                                <?php echo ucfirst($report['status']); ?>
+                            <span class="item-status status-<?php echo $status; ?>">
+                                <?php echo ucfirst($status); ?>
                             </span>
                             <span class="report-id" style="font-size: 12px; color: #666; font-family: monospace;">
-                                ID: <?php echo $report['report_id']; ?>
+                                ID: <?php echo $report_id; ?>
                             </span>
                         </div>
                         
-                        <!-- Image Container -->
+                        <!-- Rest of your code with proper variable access -->
+                        <?php 
+                        // Get images - handle both array and object
+                        $images = [];
+                        if (is_array($reportItem) && isset($reportItem['images'])) {
+                            $images = $reportItem['images'];
+                        } elseif (is_object($reportItem) && isset($reportItem->images)) {
+                            $images = $reportItem->images;
+                        }
+                        ?>
+                        
                         <div class="report-images-container" style="margin: 15px 0;">
-                            <?php if (!empty($report['images'])): ?>
+                            <?php if (!empty($images)): ?>
                                 <div class="image-thumbnails" style="display: flex; gap: 10px; flex-wrap: wrap;">
-                                    <?php foreach ($report['images'] as $index => $image): ?>
+                                    <?php foreach ($images as $imageIndex => $image): 
+                                        $imagePath = is_array($image) ? ($image['image_path'] ?? '') : ($image->image_path ?? '');
+                                    ?>
                                         <div class="image-thumb" style="width: 100px; height: 100px; border-radius: 8px; overflow: hidden; border: 2px solid #e9ecef; position: relative; cursor: pointer; background: #f8f9fa;">
-                                            <img src="<?php echo $image['image_path']; ?>" 
-                                                 alt="Item Image <?php echo $index + 1; ?>" 
+                                            <img src="<?php echo $imagePath; ?>" 
+                                                 alt="Item Image <?php echo $imageIndex + 1; ?>" 
                                                  style="width: 100%; height: 100%; object-fit: cover;"
-                                                 onclick="openImageModal('<?php echo $image['image_path']; ?>', '<?php echo htmlspecialchars(addslashes($report['description'])); ?>')">
-                                            <?php if (count($report['images']) > 1): ?>
+                                                 onclick="openImageModal('<?php echo $imagePath; ?>', '<?php echo htmlspecialchars(addslashes($reportItem['description'] ?? '')); ?>')">
+                                            <?php if (count($images) > 1): ?>
                                                 <div style="position: absolute; bottom: 0; right: 0; background: rgba(0,0,0,0.7); color: white; font-size: 10px; padding: 2px 5px; border-radius: 4px 0 0 0;">
-                                                    <?php echo $index + 1; ?>
+                                                    <?php echo $imageIndex + 1; ?>
                                                 </div>
                                             <?php endif; ?>
                                         </div>
@@ -1682,71 +1730,98 @@ if ($isAdmin) {
                         
                         <!-- Item Details -->
                         <div class="item-details">
-                            <h3><?php echo $report['category_name']; ?></h3>
-                            <p><strong>Description:</strong> <?php echo htmlspecialchars($report['description']); ?></p>
-                            <p><strong>Location:</strong> <?php echo htmlspecialchars($report['location_name']); ?></p>
-                            <p><strong>Reported:</strong> <?php echo date('M j, Y g:i A', strtotime($report['created_at'])); ?></p>
-                            <p><strong>Last Updated:</strong> <?php echo date('M j, Y g:i A', strtotime($report['updated_at'])); ?></p>
+                            <?php 
+                            // Get other properties
+                            $category_name = is_array($reportItem) ? ($reportItem['category_name'] ?? '') : ($reportItem->category_name ?? '');
+                            $description = is_array($reportItem) ? ($reportItem['description'] ?? '') : ($reportItem->description ?? '');
+                            $location_name = is_array($reportItem) ? ($reportItem['location_name'] ?? '') : ($reportItem->location_name ?? '');
+                            $created_at = is_array($reportItem) ? ($reportItem['created_at'] ?? '') : ($reportItem->created_at ?? '');
+                            $updated_at = is_array($reportItem) ? ($reportItem['updated_at'] ?? '') : ($reportItem->updated_at ?? '');
+                            $date_lost = is_array($reportItem) ? ($reportItem['date_lost'] ?? '') : ($reportItem->date_lost ?? '');
+                            $date_found = is_array($reportItem) ? ($reportItem['date_found'] ?? '') : ($reportItem->date_found ?? '');
+                            $claims = is_array($reportItem) ? ($reportItem['claims'] ?? []) : ($reportItem->claims ?? []);
+                            ?>
                             
-                            <!-- Display appropriate date based on report type -->
-                            <?php if ($report['report_type'] == 'lost' && !empty($report['date_lost'])): ?>
-                                <p><strong>Date Lost:</strong> <?php echo date('M j, Y', strtotime($report['date_lost'])); ?></p>
-                            <?php elseif ($report['report_type'] == 'found' && !empty($report['date_found'])): ?>
-                                <p><strong>Date Found:</strong> <?php echo date('M j, Y', strtotime($report['date_found'])); ?></p>
+                            <h3><?php echo $category_name; ?></h3>
+                            <p><strong>Description:</strong> <?php echo htmlspecialchars($description); ?></p>
+                            <p><strong>Location:</strong> <?php echo htmlspecialchars($location_name); ?></p>
+                            <p><strong>Reported:</strong> <?php echo date('M j, Y g:i A', strtotime($created_at)); ?></p>
+                            <p><strong>Last Updated:</strong> <?php echo date('M j, Y g:i A', strtotime($updated_at)); ?></p>
+                            
+                            <?php if ($report_type == 'lost' && !empty($date_lost)): ?>
+                                <p><strong>Date Lost:</strong> <?php echo date('M j, Y', strtotime($date_lost)); ?></p>
+                            <?php elseif ($report_type == 'found' && !empty($date_found)): ?>
+                                <p><strong>Date Found:</strong> <?php echo date('M j, Y', strtotime($date_found)); ?></p>
                             <?php endif; ?>
                             
-                            <?php if ($report['report_type'] == 'lost' && !empty($report['claims'])): ?>
+                            <!-- THE PROBLEMATIC LINE - FIXED -->
+                            <?php if ($report_type == 'lost' && !empty($claims)): ?>
                                 <div class="claims-section" style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee;">
                                     <h4 style="margin-bottom: 10px; font-size: 16px; color: #2c3e50;">Claims on this item:</h4>
-                                    <?php foreach ($report['claims'] as $claim): ?>
+                                    <?php foreach ($claims as $claim): 
+                                        $claim_id = is_array($claim) ? ($claim['claim_id'] ?? '') : ($claim->claim_id ?? '');
+                                        $claim_status = is_array($claim) ? ($claim['status'] ?? '') : ($claim->status ?? '');
+                                        $claim_description = is_array($claim) ? ($claim['claim_description'] ?? '') : ($claim->claim_description ?? '');
+                                        $admin_notes = is_array($claim) ? ($claim['admin_notes'] ?? '') : ($claim->admin_notes ?? '');
+                                    ?>
                                         <div class="claim-item" style="background: #f8f9fa; padding: 10px; margin: 5px 0; border-radius: 5px;">
-                                            <p style="margin: 0 0 5px 0;"><strong>Claim ID:</strong> <?php echo $claim['claim_id']; ?></p>
+                                            <p style="margin: 0 0 5px 0;"><strong>Claim ID:</strong> <?php echo $claim_id; ?></p>
                                             <p style="margin: 0 0 5px 0;"><strong>Status:</strong> 
                                                 <span style="padding: 2px 8px; border-radius: 12px; font-size: 12px; font-weight: bold;
                                                     background: <?php 
-                                                        if ($claim['status'] == 'approved') echo '#d4edda'; 
-                                                        elseif ($claim['status'] == 'rejected') echo '#f8d7da';
+                                                        if ($claim_status == 'approved') echo '#d4edda'; 
+                                                        elseif ($claim_status == 'rejected') echo '#f8d7da';
                                                         else echo '#fff3cd';
                                                     ?>; 
                                                     color: <?php 
-                                                        if ($claim['status'] == 'approved') echo '#155724'; 
-                                                        elseif ($claim['status'] == 'rejected') echo '#721c24';
+                                                        if ($claim_status == 'approved') echo '#155724'; 
+                                                        elseif ($claim_status == 'rejected') echo '#721c24';
                                                         else echo '#856404';
                                                     ?>;">
-                                                    <?php echo ucfirst($claim['status']); ?>
+                                                    <?php echo ucfirst($claim_status); ?>
                                                 </span>
                                             </p>
-                                            <p style="margin: 0 0 5px 0;"><strong>Claim Description:</strong> <?php echo htmlspecialchars($claim['claim_description']); ?></p>
-                                            <?php if (!empty($claim['admin_notes'])): ?>
-                                                <p style="margin: 0;"><strong>Admin Notes:</strong> <?php echo htmlspecialchars($claim['admin_notes']); ?></p>
+                                            <p style="margin: 0 0 5px 0;"><strong>Claim Description:</strong> <?php echo htmlspecialchars($claim_description); ?></p>
+                                            <?php if (!empty($admin_notes)): ?>
+                                                <p style="margin: 0;"><strong>Admin Notes:</strong> <?php echo htmlspecialchars($admin_notes); ?></p>
                                             <?php endif; ?>
                                         </div>
                                     <?php endforeach; ?>
                                 </div>
                             <?php endif; ?>
+                            <?php } catch (Exception $e) { 
+                                debug("Error in card: " . $e->getMessage(), "ERROR");
+                            } ?>
                         </div>
                         
                         <!-- Action Buttons -->
                         <div class="item-actions" style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee; display: flex; gap: 10px; flex-wrap: wrap;">
-                            <?php if (in_array($report['status'], ['pending', 'found', 'confirmed'])): ?>
-                                <a href="?tab=edit-report&id=<?php echo $report['report_id']; ?>" class="btn btn-sm btn-primary">Edit</a>
+                            <?php 
+                            // Get status for buttons
+                            $status_for_buttons = is_array($reportItem) ? ($reportItem['status'] ?? '') : ($reportItem->status ?? '');
+                            $report_id_for_buttons = is_array($reportItem) ? ($reportItem['report_id'] ?? '') : ($reportItem->report_id ?? '');
+                            ?>
+                            
+                            <?php if (in_array($status_for_buttons, ['pending', 'found', 'confirmed'])): ?>
+                                <a href="?tab=edit-report&id=<?php echo $report_id_for_buttons; ?>" class="btn btn-sm btn-primary">Edit</a>
                             <?php endif; ?>
                             
-                            <?php if (in_array($report['status'], ['pending', 'confirmed'])): ?>
+                            <?php if (in_array($status_for_buttons, ['pending', 'confirmed'])): ?>
                                 <form action="" method="POST" style="margin: 0; display: inline;">
                                     <input type="hidden" name="action" value="delete_report">
-                                    <input type="hidden" name="report_id" value="<?php echo $report['report_id']; ?>">
+                                    <input type="hidden" name="report_id" value="<?php echo $report_id_for_buttons; ?>">
                                     <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this report?')">Delete</button>
                                 </form>
                             <?php endif; ?>
                             
-                            <?php if ($report['report_type'] == 'lost' && $report['status'] == 'confirmed'): ?>
+                            <?php if ($report_type == 'lost' && $status_for_buttons == 'confirmed'): ?>
                                 <?php
                                 // Check if there's an approved claim
                                 $hasApprovedClaim = false;
-                                if (!empty($report['claims'])) {
-                                    foreach ($report['claims'] as $claim) {
-                                        if ($claim['status'] == 'approved') {
+                                if (!empty($claims)) {
+                                    foreach ($claims as $claim) {
+                                        $claim_status_check = is_array($claim) ? ($claim['status'] ?? '') : ($claim->status ?? '');
+                                        if ($claim_status_check == 'approved') {
                                             $hasApprovedClaim = true;
                                             break;
                                         }
@@ -1756,19 +1831,21 @@ if ($isAdmin) {
                                 <?php if ($hasApprovedClaim): ?>
                                     <form action="" method="POST" style="margin: 0; display: inline;">
                                         <input type="hidden" name="action" value="confirm_return">
-                                        <input type="hidden" name="report_id" value="<?php echo $report['report_id']; ?>">
+                                        <input type="hidden" name="report_id" value="<?php echo $report_id_for_buttons; ?>">
                                         <button type="submit" class="btn btn-sm btn-success" onclick="return confirm('Confirm that you have received your lost item?')">Confirm Return</button>
                                     </form>
                                 <?php endif; ?>
                             <?php endif; ?>
                             
-                            <?php if ($report['report_type'] == 'found' && $report['status'] == 'confirmed'): ?>
+                            <?php if ($report_type == 'found' && $status_for_buttons == 'confirmed'): ?>
                                 <?php
                                 // Check if current user has an approved claim for this found item
                                 $hasApprovedClaim = false;
-                                if (!empty($report['claims'])) {
-                                    foreach ($report['claims'] as $claim) {
-                                        if ($claim['status'] == 'approved' && $claim['claimed_by'] == $current_user_id) {
+                                if (!empty($claims)) {
+                                    foreach ($claims as $claim) {
+                                        $claim_status_check = is_array($claim) ? ($claim['status'] ?? '') : ($claim->status ?? '');
+                                        $claimed_by = is_array($claim) ? ($claim['claimed_by'] ?? '') : ($claim->claimed_by ?? '');
+                                        if ($claim_status_check == 'approved' && $claimed_by == $current_user_id) {
                                             $hasApprovedClaim = true;
                                             break;
                                         }
@@ -1778,17 +1855,17 @@ if ($isAdmin) {
                                 <?php if ($hasApprovedClaim): ?>
                                     <form action="" method="POST" style="margin: 0; display: inline;">
                                         <input type="hidden" name="action" value="confirm_found_return">
-                                        <input type="hidden" name="report_id" value="<?php echo $report['report_id']; ?>">
+                                        <input type="hidden" name="report_id" value="<?php echo $report_id_for_buttons; ?>">
                                         <button type="submit" class="btn btn-sm btn-success" onclick="return confirm('Confirm that you have received the found item?')">Confirm Return</button>
                                     </form>
                                 <?php endif; ?>
                             <?php endif; ?>
                             
                             <!-- "Mark as Found" button for lost items -->
-                            <?php if ($report['report_type'] == 'lost' && in_array($report['status'], ['pending', 'confirmed'])): ?>
+                            <?php if ($report_type == 'lost' && in_array($status_for_buttons, ['pending', 'confirmed'])): ?>
                                 <form action="" method="POST" style="margin: 0; display: inline;">
                                     <input type="hidden" name="action" value="mark_as_found">
-                                    <input type="hidden" name="report_id" value="<?php echo $report['report_id']; ?>">
+                                    <input type="hidden" name="report_id" value="<?php echo $report_id_for_buttons; ?>">
                                     <button type="submit" class="btn btn-sm btn-success" onclick="return confirm('Mark this lost item as found? This will update its status to returned.')">Mark as Found</button>
                                 </form>
                             <?php endif; ?>
@@ -1798,60 +1875,6 @@ if ($isAdmin) {
             </div>
         <?php endif; ?>
     </div>
-    <?php if ($report['report_type'] == 'lost' && !empty($report['claims'])): ?>
-    <div class="claims-section">
-        <h4>Claims on this item:</h4>
-        <?php foreach ($report['claims'] as $claim): ?>
-            <div class="claim-item" style="background: #f8f9fa; padding: 10px; margin: 5px 0; border-radius: 5px;">
-                <p><strong>Claim ID:</strong> <?php echo $claim['claim_id']; ?></p>
-                <p><strong>Status:</strong> 
-                    <span style="padding: 2px 6px; border-radius: 8px; font-size: 11px; 
-                                background: <?php 
-                                    if ($claim['status'] == 'approved') echo '#d4edda'; 
-                                    elseif ($claim['status'] == 'rejected') echo '#f8d7da';
-                                    else echo '#fff3cd';
-                                ?>; 
-                                color: <?php 
-                                    if ($claim['status'] == 'approved') echo '#155724'; 
-                                    elseif ($claim['status'] == 'rejected') echo '#721c24';
-                                    else echo '#856404';
-                                ?>;">
-                                <?php echo ucfirst($claim['status']); ?>
-                     </span>
-                </p>
-                    <p><strong>Claim Description:</strong> <?php echo $claim['claim_description']; ?></p>
-                        <?php if (!empty($claim['admin_notes'])): ?>
-                            <p><strong>Admin Notes:</strong> <?php echo $claim['admin_notes']; ?></p>
-                        <?php endif; ?>
-                    </div>
-                <?php endforeach; ?>
-            </div>
-        <?php endif; ?>
-    </div>
-</div>
-                        
-    <?php if ($report['report_type'] == 'found' && $report['status'] == 'confirmed'): ?>
-        <?php
-        // Check if current user has an approved claim for this found item
-        $hasApprovedClaim = false;
-        if (!empty($report['claims'])) {
-        foreach ($report['claims'] as $claim) {
-            if ($claim['status'] == 'approved' && $claim['claimed_by'] == $current_user_id) {
-                $hasApprovedClaim = true;
-                break;
-            }
-        }
-    }
-    ?>
-    <?php if ($hasApprovedClaim): ?>
-        <form action="" method="POST" style="display: inline;">
-            <input type="hidden" name="action" value="confirm_found_return">
-            <input type="hidden" name="report_id" value="<?php echo $report['report_id']; ?>">
-            <button type="submit" class="btn btn-sm btn-success" onclick="return confirm('Confirm that you have received the found item?')">Confirm Return</button>
-        </form>
-    <?php endif; ?>
-<?php endif; ?>
-</div>
                         
     <div class="item-details">
        <?php if (!empty($report['images'])): ?>
@@ -1867,40 +1890,7 @@ if ($isAdmin) {
                 </div>
             </div>
         <?php endif; ?>
-                            
-        <?php if ($report['report_type'] == 'lost' && !empty($report['claims'])): ?>
-            <div class="claims-section">
-                <h4>Claims on this item:</h4>
-                    <?php foreach ($report['claims'] as $claim): ?>
-                        <div class="claim-item" style="background: #f8f9fa; padding: 10px; margin: 5px 0; border-radius: 5px;">
-                            <p><strong>Claim ID:</strong> <?php echo $claim['claim_id']; ?></p>
-                                <p><strong>Status:</strong> 
-                                    <span style="padding: 2px 6px; border-radius: 8px; font-size: 11px; 
-                                                    background: <?php 
-                                                        if ($claim['status'] == 'approved') echo '#d4edda'; 
-                                                        elseif ($claim['status'] == 'rejected') echo '#f8d7da';
-                                                        else echo '#fff3cd';
-                                                    ?>; 
-                                                    color: <?php 
-                                                        if ($claim['status'] == 'approved') echo '#155724'; 
-                                                        elseif ($claim['status'] == 'rejected') echo '#721c24';
-                                                        else echo '#856404';
-                                                    ?>;">
-                                                    <?php echo ucfirst($claim['status']); ?>
-                                    </span>
-                                </p>
-                                <p><strong>Claim Description:</strong> <?php echo $claim['claim_description']; ?></p>
-                                    <?php if (!empty($claim['admin_notes'])): ?>
-                                        <p><strong>Admin Notes:</strong> <?php echo $claim['admin_notes']; ?></p>
-                                    <?php endif; ?>
-                            </div>
-                    <?php endforeach; ?>
-                </div>
-            <?php endif; ?>            
-            </div>
-        </div>                
-    </div>
-</div>
+    </div> 
 <?php elseif ($active_tab == 'notifications'): ?>
     <div class="notifications-section">
         <div class="notifications-header">
@@ -2095,7 +2085,6 @@ if ($isAdmin) {
                 
                 <?php if (empty($allReports)): ?>
                     <div class="no-items">
-                        <div class="no-items-icon">📭</div>
                         <h4>No reports found</h4>
                         <p>There are no reports in the system yet.</p>
                     </div>

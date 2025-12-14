@@ -435,37 +435,45 @@ class Report {
         return $prefix . str_pad($number, 3, '0', STR_PAD_LEFT);
     }
     
-    public function getReportsByUser($user_id) {
-        $stmt = $this->db->prepare("
-            SELECT r.*, i.description, i.item_id, l.location_name, c.category_name,
-                   (SELECT GROUP_CONCAT(claim_id) FROM claim WHERE report_id = r.report_id) as claim_ids
-            FROM report r
-            LEFT JOIN item i ON r.item_id = i.item_id
-            LEFT JOIN location l ON i.location_id = l.location_id
-            LEFT JOIN category c ON i.category_id = c.category_id
-            WHERE r.user_id = ?
-            ORDER BY r.created_at DESC
-        ");
-        $stmt->execute([$user_id]);
-        $reports = $stmt->fetchAll();
-        
-        // Get claims for each report
-        foreach ($reports as &$report) {
-            if ($report['claim_ids']) {
-                $claimStmt = $this->db->prepare("
-                    SELECT * FROM claim 
-                    WHERE report_id = ? 
-                    ORDER BY created_at DESC
-                ");
-                $claimStmt->execute([$report['report_id']]);
-                $report['claims'] = $claimStmt->fetchAll();
-            } else {
-                $report['claims'] = [];
-            }
+public function getReportsByUser($user_id) {
+    $stmt = $this->db->prepare("
+        SELECT r.*, i.description, i.item_id, l.location_name, c.category_name,
+               (SELECT GROUP_CONCAT(claim_id) FROM claim WHERE report_id = r.report_id) as claim_ids
+        FROM report r
+        LEFT JOIN item i ON r.item_id = i.item_id
+        LEFT JOIN location l ON i.location_id = l.location_id
+        LEFT JOIN category c ON i.category_id = c.category_id
+        WHERE r.user_id = ?
+        ORDER BY r.created_at DESC
+    ");
+    $stmt->execute([$user_id]);
+    $reports = $stmt->fetchAll(PDO::FETCH_ASSOC); // Explicitly fetch as associative array
+    
+    // Get claims for each report
+    foreach ($reports as &$report) {
+        if ($report['claim_ids']) {
+            $claimStmt = $this->db->prepare("
+                SELECT * FROM claim 
+                WHERE report_id = ? 
+                ORDER BY created_at DESC
+            ");
+            $claimStmt->execute([$report['report_id']]);
+            $report['claims'] = $claimStmt->fetchAll(PDO::FETCH_ASSOC); // Fetch as associative array
+        } else {
+            $report['claims'] = [];
         }
         
-        return $reports;
+        // Get images for the item
+        $imageStmt = $this->db->prepare("
+            SELECT * FROM item_image 
+            WHERE item_id = ?
+        ");
+        $imageStmt->execute([$report['item_id']]);
+        $report['images'] = $imageStmt->fetchAll(PDO::FETCH_ASSOC); // Fetch as associative array
     }
+    
+    return $reports;
+}
     public function getReportById($report_id) {
     $stmt = $this->db->prepare("
         SELECT r.*, i.description, i.item_id, i.category_id, l.location_name, c.category_name,

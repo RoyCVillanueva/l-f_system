@@ -1521,3 +1521,429 @@ label:contains("*") .required-asterisk {
     color: #e74c3c;
     font-weight: bold;
 }
+
+/* Tab Container Styles */
+.tabs-container {
+    display: flex;
+    gap: 5px;
+    margin-bottom: 30px;
+    background: #f8f9fa;
+    padding: 10px;
+    border-radius: 10px;
+    flex-wrap: wrap;
+}
+
+/* Base Tab Styles */
+.tabs-container .tab {
+    flex: 1;
+    text-align: center;
+    padding: 15px;
+    border-radius: 8px;
+    font-weight: 600;
+    text-decoration: none;
+    color: #495057;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 120px;
+    position: relative;
+}
+
+/* Hover effect for all tabs */
+.tabs-container .tab:hover {
+    background: #e9ecef;
+    transform: translateY(-2px);
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+
+/* Active state for all tabs - using consistent blue color */
+.tabs-container .tab.active {
+    background: #3498db; /* Same blue as other active elements */
+    color: white;
+    box-shadow: 0 4px 8px rgba(52, 152, 219, 0.3);
+}
+
+/* Tab badge for notifications */
+.tabs-container .tab-badge {
+    background: #e74c3c;
+    color: white;
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: 8px;
+    font-weight: bold;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .tabs-container {
+        flex-direction: column;
+        gap: 10px;
+    }
+    
+    .tabs-container .tab {
+        min-width: 100%;
+    }
+}
+/* Statistics Tab Detailed Styles */
+.stats-sections {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+    gap: 25px;
+    margin-top: 30px;
+}
+
+.stats-section {
+    background: white;
+    border-radius: 12px;
+    padding: 25px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+    border: 1px solid #e9ecef;
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.stats-section:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.08);
+}
+
+.stats-section h3 {
+    color: #2c3e50;
+    margin: 0 0 20px 0;
+    padding-bottom: 12px;
+    border-bottom: 2px solid #ecf0f1;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+/* Chart Styles for Status Distribution */
+.stats-chart {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.chart-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 0;
+}
+
+.chart-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 120px;
+    font-size: 14px;
+    font-weight: 500;
+    color: #2c3e50;
+}
+
+.status-indicator {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.status-pending { background-color: #ffc107; }
+.status-found { background-color: #17a2b8; }
+.status-returned { background-color: #28a745; }
+.status-confirmed { background-color: #007bff; }
+
+.chart-bar {
+    flex: 1;
+    height: 20px;
+    background: #f8f9fa;
+    border-radius: 10px;
+    overflow: hidden;
+    position: relative;
+}
+
+.chart-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #3498db, #2980b9);
+    border-radius: 10px;
+    transition: width 1s ease;
+}
+
+.chart-value {
+    min-width: 80px;
+    text-align: right;
+    font-size: 13px;
+    font-weight: 600;
+    color: #495057;
+}
+
+/* Category Statistics */
+.category-stats {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.category-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 15px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    border-left: 4px solid #3498db;
+    transition: all 0.3s ease;
+}
+
+.category-item:hover {
+    background: #e9ecef;
+    transform: translateX(3px);
+}
+
+.category-name {
+    font-weight: 600;
+    color: #2c3e50;
+    font-size: 15px;
+}
+
+.category-numbers {
+    display: flex;
+    gap: 15px;
+    font-size: 13px;
+}
+
+.category-numbers .total {
+    color: #6c757d;
+}
+
+.category-numbers .returned {
+    color: #28a745;
+    font-weight: 600;
+}
+
+.category-numbers .rate {
+    color: #007bff;
+    font-weight: 600;
+}
+
+/* Claim Statistics */
+.claim-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 12px;
+}
+
+.claim-stat-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 15px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    text-align: center;
+    transition: all 0.3s ease;
+}
+
+.claim-stat-item:hover {
+    background: #e9ecef;
+    transform: translateY(-2px);
+}
+
+.claim-status {
+    font-size: 14px;
+    font-weight: 600;
+    color: #2c3e50;
+    margin-bottom: 5px;
+}
+
+.claim-count {
+    font-size: 24px;
+    font-weight: 700;
+    color: #3498db;
+    margin-bottom: 3px;
+}
+
+.claim-percentage {
+    font-size: 13px;
+    color: #28a745;
+    font-weight: 600;
+}
+
+/* Location Statistics */
+.location-stats {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.location-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 15px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    border-left: 4px solid #28a745;
+    transition: all 0.3s ease;
+}
+
+.location-item:hover {
+    background: #e9ecef;
+}
+
+.location-name {
+    font-weight: 500;
+    color: #2c3e50;
+    font-size: 14px;
+}
+
+.location-count {
+    font-size: 14px;
+    font-weight: 600;
+    color: #6c757d;
+}
+
+/* Monthly Trends Table */
+.trends-table {
+    overflow-x: auto;
+    margin-top: 10px;
+}
+
+.trends-table table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+}
+
+.trends-table th {
+    background: #3498db;
+    color: white;
+    padding: 12px 15px;
+    text-align: left;
+    font-weight: 600;
+    border: none;
+}
+
+.trends-table td {
+    padding: 12px 15px;
+    border-bottom: 1px solid #e9ecef;
+    color: #495057;
+}
+
+.trends-table tr:hover {
+    background: #f8f9fa;
+}
+
+.trends-table .highlight-cell {
+    font-weight: 700;
+    color: #28a745;
+}
+
+/* Top Reporters */
+.top-reporters {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.reporter-item {
+    padding: 15px;
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border-radius: 8px;
+    border-left: 4px solid #ffc107;
+    transition: all 0.3s ease;
+}
+
+.reporter-item:hover {
+    transform: translateX(3px);
+    box-shadow: 0 3px 8px rgba(0,0,0,0.1);
+}
+
+.reporter-stats {
+    font-size: 14px;
+    color: #2c3e50;
+    line-height: 1.5;
+}
+
+.reporter-stats::before {
+    content: "📊 ";
+    margin-right: 5px;
+}
+
+/* Responsive Design for Statistics */
+@media (max-width: 992px) {
+    .stats-sections {
+        grid-template-columns: 1fr;
+    }
+    
+    .claim-stats {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 768px) {
+    .stats-section {
+        padding: 20px;
+    }
+    
+    .chart-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 5px;
+    }
+    
+    .chart-label {
+        min-width: 100%;
+    }
+    
+    .chart-bar {
+        width: 100%;
+    }
+    
+    .chart-value {
+        text-align: left;
+        min-width: auto;
+    }
+    
+    .category-numbers {
+        flex-direction: column;
+        gap: 5px;
+        align-items: flex-end;
+    }
+    
+    .location-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 5px;
+    }
+    
+    .location-count {
+        align-self: flex-end;
+    }
+    
+    .claim-stats {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 480px) {
+    .stats-section {
+        padding: 15px;
+    }
+    
+    .trends-table {
+        font-size: 13px;
+    }
+    
+    .trends-table th,
+    .trends-table td {
+        padding: 8px 10px;
+    }
+}
