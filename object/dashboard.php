@@ -1,9 +1,6 @@
 <?php
 session_start();
 
-error_reporting(E_ALL);
-ini_set('display_errors', 1);
-
 // Redirect to login if not authenticated
 if (!isset($_SESSION['logged_in']) || !$_SESSION['logged_in']) {
     header('Location: login.php');
@@ -1621,24 +1618,6 @@ if ($isAdmin) {
     </div>
 
 <?php elseif ($active_tab == 'my-reports'): ?>
-    <?php
-    // DEBUG: Let's see what's happening
-    debug("Entering my-reports section", "MY-REPORTS");
-    
-    $reportObj = new Report();
-    debug($reportObj, "Report object");
-    
-    $userReports = $reportObj->getReportsByUser($current_user_id);
-    debug(gettype($userReports), "Type of userReports");
-    
-    if (!empty($userReports)) {
-        debug(count($userReports), "Number of reports");
-        $firstReport = reset($userReports);
-        debug(gettype($firstReport), "Type of first report");
-        debug($firstReport, "First report contents");
-    }
-    ?>
-    
     <div class="my-reports-section">
         <h2>My Reports</h2>
         <?php
@@ -1690,7 +1669,6 @@ if ($isAdmin) {
                             </span>
                         </div>
                         
-                        <!-- Rest of your code with proper variable access -->
                         <?php 
                         // Get images - handle both array and object
                         $images = [];
@@ -1754,7 +1732,6 @@ if ($isAdmin) {
                                 <p><strong>Date Found:</strong> <?php echo date('M j, Y', strtotime($date_found)); ?></p>
                             <?php endif; ?>
                             
-                            <!-- THE PROBLEMATIC LINE - FIXED -->
                             <?php if ($report_type == 'lost' && !empty($claims)): ?>
                                 <div class="claims-section" style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee;">
                                     <h4 style="margin-bottom: 10px; font-size: 16px; color: #2c3e50;">Claims on this item:</h4>
