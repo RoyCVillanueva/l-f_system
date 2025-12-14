@@ -1325,3 +1325,199 @@ input[type="file"]::file-selector-button:hover {
 .item-card > .item-details {
     flex: 1 0 auto;
 }
+
+/* Claim Image Upload Styles */
+.claim-upload-container {
+    margin-top: 15px;
+    padding: 15px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    border: 2px dashed #dee2e6;
+}
+
+.claim-upload-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.claim-upload-header h4 {
+    margin: 0;
+    color: #2c3e50;
+    font-size: 16px;
+}
+
+.claim-upload-header .optional-badge {
+    background: #6c757d;
+    color: white;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: bold;
+}
+
+.claim-upload-instructions {
+    margin-bottom: 15px;
+    color: #6c757d;
+    font-size: 14px;
+}
+
+.claim-upload-instructions ul {
+    margin: 10px 0 0 20px;
+    padding: 0;
+}
+
+.claim-upload-instructions li {
+    margin-bottom: 5px;
+}
+
+.claim-image-previews {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    gap: 10px;
+    margin-top: 15px;
+}
+
+.claim-image-preview-item {
+    position: relative;
+    width: 100px;
+    height: 100px;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 2px solid #e9ecef;
+    background: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.claim-image-preview-item img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+
+.claim-remove-image {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    background: #dc3545;
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    font-size: 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.3s;
+}
+
+.claim-image-preview-item:hover .claim-remove-image {
+    opacity: 1;
+}
+
+.claim-image-info {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: rgba(0,0,0,0.7);
+    color: white;
+    padding: 2px 5px;
+    font-size: 9px;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.claim-upload-btn {
+    margin-top: 15px;
+}
+
+.claim-upload-btn input[type="file"] {
+    padding: 8px;
+    border: 2px dashed #dee2e6;
+    border-radius: 8px;
+    background: white;
+    cursor: pointer;
+    transition: all 0.3s;
+    width: 100%;
+}
+
+.claim-upload-btn input[type="file"]:hover {
+    border-color: #3498db;
+    background: #e8f4fd;
+}
+
+.claim-upload-btn input[type="file"]::file-selector-button {
+    padding: 8px 16px;
+    background: #3498db;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-weight: 600;
+    margin-right: 10px;
+    transition: all 0.3s;
+}
+
+.claim-upload-btn input[type="file"]::file-selector-button:hover {
+    background: #2980b9;
+}
+
+/* Drag and drop for claim images */
+.claim-upload-container.drag-over {
+    background: #e8f4fd !important;
+    border-color: #3498db !important;
+    border-style: solid !important;
+}
+
+/* Claim form improvements */
+.claim-form textarea {
+    min-height: 100px;
+    margin-bottom: 15px;
+}
+
+.claim-required-notice {
+    font-size: 12px;
+    color: #dc3545;
+    margin-top: 5px;
+    display: block;
+}
+
+/* Responsive adjustments for claim form */
+@media (max-width: 768px) {
+    .claim-image-previews {
+        grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+    }
+    
+    .claim-image-preview-item {
+        width: 80px;
+        height: 80px;
+    }
+}
+
+/* Red asterisk for required fields */
+.required-asterisk {
+    color: #e74c3c;
+    font-weight: bold;
+    margin-left: 2px;
+}
+
+/* Apply to existing labels that have asterisks */
+label:contains("*") .required-asterisk {
+    color: #e74c3c;
+}
+
+/* Style for labels that indicate required fields */
+.required-field::after {
+    content: " *";
+    color: #e74c3c;
+    font-weight: bold;
+}

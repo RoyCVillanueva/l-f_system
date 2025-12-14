@@ -394,7 +394,7 @@ function DeleteReport() {
     exit;
 }
 
-// Function to submit claim for found items with validation
+// Function to submit claim for found items with validation and image upload
 function SubmitClaim() {
     global $current_user_id;
     
@@ -466,6 +466,16 @@ function SubmitClaim() {
         $result = $claim->create($claimId, 'pending', $report_id, $current_user_id, $description);
         
         if ($result) {
+            // Handle claim image uploads
+            $uploadedImages = handleClaimImageUpload($claimId);
+            
+            if (!empty($uploadedImages)) {
+                error_log("Uploaded " . count($uploadedImages) . " images for claim {$claimId}");
+                // Here you would typically save image references to database
+                // You'll need to create a new function in the Claim class or create a new class
+                saveClaimImages($claimId, $uploadedImages);
+            }
+            
             error_log("Claim submitted successfully: {$claimId}");
             $_SESSION['message'] = 'Claim submitted successfully! Claim ID: ' . $claimId;
         } else {
@@ -480,6 +490,72 @@ function SubmitClaim() {
     
     header('Location: ' . $_SERVER['PHP_SELF'] . '?tab=browse-items');
     exit;
+}
+
+// New function to handle claim image uploads
+function handleClaimImageUpload($claimId) {
+    $uploadedPaths = [];
+    
+    if (!empty($_FILES['claim_images']['name'][0])) {
+        // Create claim-specific upload directory
+        $uploadDir = SystemConfig::UPLOAD_DIR . 'claims/' . $claimId . '/';
+        
+        // Create directory if it doesn't exist
+        if (!file_exists($uploadDir)) {
+            mkdir($uploadDir, 0777, true);
+        }
+        
+        // Limit to 5 images
+        $fileCount = count($_FILES['claim_images']['name']);
+        if ($fileCount > 5) {
+            throw new Exception("Maximum 5 images allowed for claims.");
+        }
+        
+        foreach ($_FILES['claim_images']['tmp_name'] as $key => $tmpName) {
+            if ($_FILES['claim_images']['error'][$key] === UPLOAD_ERR_OK) {
+                $fileName = uniqid() . '_' . basename($_FILES['claim_images']['name'][$key]);
+                $filePath = $uploadDir . $fileName;
+                
+                // Validate file type and size
+                $fileType = mime_content_type($tmpName);
+                $fileSize = $_FILES['claim_images']['size'][$key];
+                
+                if (in_array($fileType, SystemConfig::ALLOWED_FILE_TYPES) && 
+                    $fileSize <= SystemConfig::MAX_FILE_SIZE) {
+                    
+                    if (move_uploaded_file($tmpName, $filePath)) {
+                        $uploadedPaths[] = [
+                            'path' => $filePath,
+                            'name' => $_FILES['claim_images']['name'][$key],
+                            'size' => $fileSize
+                        ];
+                    }
+                } else {
+                    throw new Exception("Invalid file type or size for image: " . $_FILES['claim_images']['name'][$key]);
+                }
+            }
+        }
+    }
+    
+    return $uploadedPaths;
+}
+
+// Function to save claim images to database
+function saveClaimImages($claimId, $images) {
+    try {
+        $db = DatabaseService::getInstance()->getConnection();
+        
+        foreach ($images as $image) {
+            $imageId = uniqid('claim_img_', true);
+            $stmt = $db->prepare("INSERT INTO claim_images (image_id, claim_id, image_path, file_name, file_size) VALUES (?, ?, ?, ?, ?)");
+            $stmt->execute([$imageId, $claimId, $image['path'], $image['name'], $image['size']]);
+        }
+        
+        return true;
+    } catch (Exception $e) {
+        error_log("Error saving claim images: " . $e->getMessage());
+        return false;
+    }
 }
 
 // Function to confirm return of lost item
@@ -1166,54 +1242,53 @@ if ($isAdmin) {
                 <input type="hidden" name="related_lost_report_id" value="<?php echo $prefilledData['lost_report_id']; ?>">
             <?php endif; ?>
             
-            <div class="form-group">
-                <label for="description">Item Description *</label>
-                <textarea id="description" name="description" required placeholder="Describe the item in detail (color, brand, distinctive features, etc.)"><?php echo isset($prefilledData['description']) ? $prefilledData['description'] : ''; ?></textarea>
-            </div>
-            
-            <div class="form-group">
-                <label for="category_id">Category *</label>
-                <select id="category_id" name="category_id" required>
-                    <option value="">Select Category</option>
-                    <?php
-                    $category = new Category();
-                    $categories = $category->getAll();
-                    foreach ($categories as $cat): ?>
-                        <option value="<?php echo $cat['category_id']; ?>" <?php echo (isset($prefilledData['category_id']) && $prefilledData['category_id'] == $cat['category_id']) ? 'selected' : ''; ?>>
-                            <?php echo $cat['category_name']; ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
-            
-            <div class="form-group">
-                <label for="location_name">Location *</label>
-                <input type="text" id="location_name" name="location_name" required 
-                       placeholder="Where did you lose/find the item?"
-                       value="<?php echo isset($prefilledData['location_name']) ? $prefilledData['location_name'] : ''; ?>">
-                <?php if (isset($prefilledData['is_from_lost_report'])): ?>
-                    <small style="color: #666; display: block; margin-top: 5px;">
-                        Note that this location is from the lost report. Please update to where you actually found the item.
-                    </small>
-                <?php endif; ?>
-            </div>
+<div class="form-group">
+    <label for="description">Item Description <span class="required-asterisk">*</span></label>
+    <textarea id="description" name="description" required placeholder="Describe the item in detail (color, brand, distinctive features, etc.)"><?php echo isset($prefilledData['description']) ? $prefilledData['description'] : ''; ?></textarea>
+</div>
 
-            <!-- Updated Date Fields with proper display control -->
-            <div class="date-fields">
-                <div class="form-group date-lost-field" style="<?php echo (isset($prefilledData['report_type']) && $prefilledData['report_type'] == 'found') ? 'display: none;' : 'display: block;'; ?>">
-                    <label for="date_lost">Date Lost *</label>
-                    <input type="date" id="date_lost" name="date_lost" 
-                           max="<?php echo date('Y-m-d'); ?>"
-                           value="<?php echo date('Y-m-d'); ?>">
-                </div>
-                
-                <div class="form-group date-found-field" style="<?php echo (isset($prefilledData['report_type']) && $prefilledData['report_type'] == 'found') ? 'display: block;' : 'display: none;'; ?>">
-                    <label for="date_found">Date Found *</label>
-                    <input type="date" id="date_found" name="date_found" 
-                           max="<?php echo date('Y-m-d'); ?>"
-                           value="<?php echo date('Y-m-d'); ?>">
-                </div>
-            </div>
+<div class="form-group">
+    <label for="category_id">Category <span class="required-asterisk">*</span></label>
+    <select id="category_id" name="category_id" required>
+        <option value="">Select Category</option>
+        <?php
+        $category = new Category();
+        $categories = $category->getAll();
+        foreach ($categories as $cat): ?>
+            <option value="<?php echo $cat['category_id']; ?>" <?php echo (isset($prefilledData['category_id']) && $prefilledData['category_id'] == $cat['category_id']) ? 'selected' : ''; ?>>
+                <?php echo $cat['category_name']; ?>
+            </option>
+        <?php endforeach; ?>
+    </select>
+</div>
+
+<div class="form-group">
+    <label for="location_name">Location <span class="required-asterisk">*</span></label>
+    <input type="text" id="location_name" name="location_name" required 
+           placeholder="Where did you lose/find the item?"
+           value="<?php echo isset($prefilledData['location_name']) ? $prefilledData['location_name'] : ''; ?>">
+    <?php if (isset($prefilledData['is_from_lost_report'])): ?>
+        <small style="color: #666; display: block; margin-top: 5px;">
+            Note that this location is from the lost report. Please update to where you actually found the item.
+        </small>
+    <?php endif; ?>
+</div>
+
+<div class="date-fields">
+    <div class="form-group date-lost-field" style="<?php echo (isset($prefilledData['report_type']) && $prefilledData['report_type'] == 'found') ? 'display: none;' : 'display: block;'; ?>">
+        <label for="date_lost">Date Lost <span class="required-asterisk">*</span></label>
+        <input type="date" id="date_lost" name="date_lost" 
+               max="<?php echo date('Y-m-d'); ?>"
+               value="<?php echo date('Y-m-d'); ?>">
+    </div>
+    
+    <div class="form-group date-found-field" style="<?php echo (isset($prefilledData['report_type']) && $prefilledData['report_type'] == 'found') ? 'display: block;' : 'display: none;'; ?>">
+        <label for="date_found">Date Found <span class="required-asterisk">*</span></label>
+        <input type="date" id="date_found" name="date_found" 
+               max="<?php echo date('Y-m-d'); ?>"
+               value="<?php echo date('Y-m-d'); ?>">
+    </div>
+</div>
             
             <div class="form-group">
                 <label for="images">Upload Images (Optional)</label>
@@ -1440,21 +1515,70 @@ if ($isAdmin) {
                         Claim This Item
                     </button>
                     
-                    <div id="claim-form-<?php echo $item['report_id']; ?>" class="claim-form" style="display: none;">
-                        <form action="" method="POST">
-                            <input type="hidden" name="action" value="submit_claim">
-                            <input type="hidden" name="report_id" value="<?php echo $item['report_id']; ?>">
-                            <label for="claim_description_<?php echo $item['report_id']; ?>">
-                                Why do you think this is your item?
-                            </label>
-                            <textarea id="claim_description_<?php echo $item['report_id']; ?>" 
-                                      name="claim_description" 
-                                      required 
-                                      placeholder="Please provide details to support your claim (e.g., distinctive features, when/where you lost it, etc.)"></textarea>
-                            <button type="submit" class="btn btn-primary">Submit Claim</button>
-                            <button type="button" class="btn btn-secondary" onclick="toggleClaimForm('<?php echo $item['report_id']; ?>')">Cancel</button>
-                        </form>
-                    </div>
+    <div id="claim-form-<?php echo $item['report_id']; ?>" class="claim-form" style="display: none;">
+            <form action="" method="POST" enctype="multipart/form-data">
+            <input type="hidden" name="action" value="submit_claim">
+            <input type="hidden" name="report_id" value="<?php echo $item['report_id']; ?>">
+        
+        <div class="form-group">
+        <label for="claim_description_<?php echo $item['report_id']; ?>">
+        Why do you think this is your item? <span class="required-asterisk">*</span>
+        </label>
+        <textarea id="claim_description_<?php echo $item['report_id']; ?>" 
+              name="claim_description" 
+              required 
+              placeholder="Please provide detailed information to support your claim:
+• Describe distinctive features of the item
+• Mention when and where you lost it
+• Provide any serial numbers or unique identifiers
+• Explain any modifications or personalization
+• Share purchase details or proof of ownership"></textarea>
+</div>
+        
+        <!-- Image Upload Section -->
+        <div class="claim-upload-container" id="claim-upload-container-<?php echo $item['report_id']; ?>">
+            <div class="claim-upload-header">
+                <h4>Upload Supporting Images (Optional)</h4>
+                <span class="optional-badge">Optional</span>
+            </div>
+            
+            <div class="claim-upload-instructions">
+                <p>Upload images that help verify your ownership claim:</p>
+                <ul>
+                    <li>Photos of you with the item</li>
+                    <li>Purchase receipts or warranty cards</li>
+                    <li>Serial numbers or unique markings</li>
+                    <li>Previous photos showing the item's condition</li>
+                </ul>
+                <p><small>Max 5 images, 2MB each. Supported: JPG, PNG, GIF</small></p>
+            </div>
+            
+            <div class="form-group">
+                <label for="claim_images_<?php echo $item['report_id']; ?>">
+                    Upload Supporting Images <span class="optional-badge">(Optional)</span>
+                </label>
+                <input type="file" 
+                    id="claim_images_<?php echo $item['report_id']; ?>" 
+                    name="claim_images[]" 
+                    multiple 
+                    accept="image/*"
+                    onchange="previewClaimImages(event, '<?php echo $item['report_id']; ?>')">
+            </div>
+            
+            <!-- Image Preview Container -->
+            <div id="claim-image-preview-<?php echo $item['report_id']; ?>" 
+                 class="claim-image-previews" 
+                 style="<?php echo isset($imagePreviews) && !empty($imagePreviews) ? 'display: grid;' : 'display: none;'; ?>">
+                <!-- Image previews will be inserted here by JavaScript -->
+            </div>
+        </div>
+        
+        <div style="display: flex; gap: 10px; margin-top: 20px;">
+            <button type="submit" class="btn btn-primary">Submit Claim</button>
+            <button type="button" class="btn btn-secondary" onclick="toggleClaimForm('<?php echo $item['report_id']; ?>')">Cancel</button>
+        </div>
+    </form>
+</div>
                 <?php else: ?>
                     <div class="claim-message">
                         <?php echo $claimMessage; ?>
@@ -1861,12 +1985,12 @@ if ($isAdmin) {
                 <input type="hidden" name="item_id" value="<?php echo $reportDetails['item_id']; ?>">
                 
                 <div class="form-group">
-                    <label for="description">Item Description *</label>
+                    <label for="description">Item Description <span class="required-asterisk">*</span></label>
                     <textarea id="description" name="description" required placeholder="Describe the item in detail"><?php echo htmlspecialchars($itemDetails['description']); ?></textarea>
                 </div>
-                
+
                 <div class="form-group">
-                    <label for="category_id">Category *</label>
+                    <label for="category_id">Category <span class="required-asterisk">*</span></label>
                     <select id="category_id" name="category_id" required>
                         <option value="">Select Category</option>
                         <?php
@@ -1880,12 +2004,12 @@ if ($isAdmin) {
                         <?php endforeach; ?>
                     </select>
                 </div>
-                
+
                 <div class="form-group">
-                    <label for="location_name">Location *</label>
+                    <label for="location_name">Location <span class="required-asterisk">*</span></label>
                     <input type="text" id="location_name" name="location_name" required 
-                           value="<?php echo htmlspecialchars($reportDetails['location_name']); ?>"
-                           placeholder="Where did you lose/find the item?">
+                        value="<?php echo htmlspecialchars($reportDetails['location_name']); ?>"
+                        placeholder="Where did you lose/find the item?">
                 </div>
                 
                 <div class="form-group">
@@ -2139,7 +2263,7 @@ if ($isAdmin) {
                                         
                                         <div class="form-group">
                                             <label for="admin_notes_reject_<?php echo $claimItem['claim_id']; ?>">
-                                                Reason for Rejection <span class="required">*</span>
+                                                Reason for Rejection <span class="required-asterisk">*</span>
                                             </label>
                                             <textarea 
                                                 id="admin_notes_reject_<?php echo $claimItem['claim_id']; ?>"
@@ -2376,21 +2500,24 @@ if ($isAdmin) {
         <input type="hidden" name="action" value="generate_report">
         <input type="hidden" name="format" value="view" id="report-format">
         
-        <div class="form-row" style="display: flex; gap: 20px; margin-bottom: 20px; flex-wrap: wrap;">
             <div class="form-group" style="flex: 1; min-width: 200px;">
-                <label for="start_date" style="display: block; margin-bottom: 8px; font-weight: 600; color: #495057;">Start Date *</label>
+                <label for="start_date" style="display: block; margin-bottom: 8px; font-weight: 600; color: #495057;">
+                    Start Date <span class="required-asterisk">*</span>
+                </label>
                 <input type="date" id="start_date" name="start_date" required 
-                       value="<?php echo date('Y-m-01'); ?>"
-                       max="<?php echo date('Y-m-d'); ?>"
-                       style="width: 100%; padding: 10px; border: 1px solid #ced4da; border-radius: 5px; font-size: 14px;">
+                    value="<?php echo date('Y-m-01'); ?>"
+                    max="<?php echo date('Y-m-d'); ?>"
+                    style="width: 100%; padding: 10px; border: 1px solid #ced4da; border-radius: 5px; font-size: 14px;">
             </div>
-            
+
             <div class="form-group" style="flex: 1; min-width: 200px;">
-                <label for="end_date" style="display: block; margin-bottom: 8px; font-weight: 600; color: #495057;">End Date *</label>
+                <label for="end_date" style="display: block; margin-bottom: 8px; font-weight: 600; color: #495057;">
+                    End Date <span class="required-asterisk">*</span>
+                </label>
                 <input type="date" id="end_date" name="end_date" required 
-                       value="<?php echo date('Y-m-d'); ?>"
-                       max="<?php echo date('Y-m-d'); ?>"
-                       style="width: 100%; padding: 10px; border: 1px solid #ced4da; border-radius: 5px; font-size: 14px;">
+                    value="<?php echo date('Y-m-d'); ?>"
+                    max="<?php echo date('Y-m-d'); ?>"
+                    style="width: 100%; padding: 10px; border: 1px solid #ced4da; border-radius: 5px; font-size: 14px;">
             </div>
             
             <div class="form-group" style="flex: 1; min-width: 200px;">
@@ -3260,6 +3387,208 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 });
+
+// Claim image preview functionality
+function previewClaimImages(event, reportId) {
+    const files = event.target.files;
+    const previewContainer = document.getElementById('claim-image-preview-' + reportId);
+    const uploadContainer = document.getElementById('claim-upload-container-' + reportId);
+    
+    // Clear previous previews
+    previewContainer.innerHTML = '';
+    
+    if (files.length === 0) {
+        previewContainer.style.display = 'none';
+        return;
+    }
+    
+    // Validate file count
+    if (files.length > 5) {
+        alert('Maximum 5 images allowed for claims.');
+        event.target.value = ''; // Clear the input
+        previewContainer.style.display = 'none';
+        return;
+    }
+    
+    // Show preview container
+    previewContainer.style.display = 'grid';
+    
+    // Process each file
+    for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        
+        // Validate file type
+        if (!file.type.match('image.*')) {
+            alert(`File "${file.name}" is not an image. Please select image files only.`);
+            continue;
+        }
+        
+        // Validate file size (2MB = 2 * 1024 * 1024 bytes)
+        if (file.size > 2 * 1024 * 1024) {
+            alert(`File "${file.name}" is too large. Maximum size is 2MB.`);
+            continue;
+        }
+        
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const previewDiv = document.createElement('div');
+            previewDiv.className = 'claim-image-preview-item';
+            
+            const img = document.createElement('img');
+            img.src = e.target.result;
+            img.alt = `Claim evidence ${i + 1}`;
+            
+            const removeBtn = document.createElement('button');
+            removeBtn.type = 'button';
+            removeBtn.className = 'claim-remove-image';
+            removeBtn.innerHTML = '×';
+            removeBtn.onclick = function() {
+                removeClaimImagePreview(file.name, event.target, previewDiv, reportId);
+            };
+            
+            const fileInfo = document.createElement('div');
+            fileInfo.className = 'claim-image-info';
+            fileInfo.textContent = `${file.name} (${formatFileSize(file.size)})`;
+            
+            previewDiv.appendChild(img);
+            previewDiv.appendChild(removeBtn);
+            previewDiv.appendChild(fileInfo);
+            previewContainer.appendChild(previewDiv);
+        };
+        
+        reader.readAsDataURL(file);
+    }
+}
+
+function removeClaimImagePreview(fileName, fileInput, previewDiv, reportId) {
+    // Remove preview
+    previewDiv.remove();
+    
+    // Create a new FileList without the removed file
+    const dataTransfer = new DataTransfer();
+    const files = fileInput.files;
+    
+    for (let i = 0; i < files.length; i++) {
+        if (files[i].name !== fileName) {
+            dataTransfer.items.add(files[i]);
+        }
+    }
+    
+    // Update file input
+    fileInput.files = dataTransfer.files;
+    
+    // Hide preview container if no images left
+    const previewContainer = document.getElementById('claim-image-preview-' + reportId);
+    if (previewContainer.children.length === 0) {
+        previewContainer.style.display = 'none';
+    }
+}
+
+// Drag and drop for claim images
+function setupClaimDragAndDrop() {
+    const claimUploadContainers = document.querySelectorAll('.claim-upload-container');
+    
+    claimUploadContainers.forEach(container => {
+        const fileInput = container.querySelector('input[type="file"]');
+        
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            container.addEventListener(eventName, preventDefaults, false);
+        });
+        
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+        
+        ['dragenter', 'dragover'].forEach(eventName => {
+            container.addEventListener(eventName, function() {
+                container.classList.add('drag-over');
+            }, false);
+        });
+        
+        ['dragleave', 'drop'].forEach(eventName => {
+            container.addEventListener(eventName, function() {
+                container.classList.remove('drag-over');
+            }, false);
+        });
+        
+        container.addEventListener('drop', function(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            
+            if (files.length) {
+                // Update file input
+                const dataTransfer = new DataTransfer();
+                const existingFiles = fileInput.files;
+                
+                // Keep existing files
+                for (let i = 0; i < existingFiles.length; i++) {
+                    dataTransfer.items.add(existingFiles[i]);
+                }
+                
+                // Add new files (limit to 5 total)
+                const totalFiles = existingFiles.length + files.length;
+                if (totalFiles > 5) {
+                    alert('Maximum 5 images allowed for claims. You have ' + existingFiles.length + ' existing files.');
+                    return;
+                }
+                
+                for (let i = 0; i < files.length; i++) {
+                    if (files[i].type.match('image.*') && files[i].size <= 2 * 1024 * 1024) {
+                        dataTransfer.items.add(files[i]);
+                    } else {
+                        alert(`File "${files[i].name}" is not a valid image or exceeds 2MB limit.`);
+                    }
+                }
+                
+                fileInput.files = dataTransfer.files;
+                
+                // Trigger change event to show previews
+                const event = new Event('change');
+                fileInput.dispatchEvent(event);
+            }
+        }, false);
+    });
+}
+
+// Initialize when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    setupClaimDragAndDrop();
+    
+    // Update file input labels to show count
+    const claimFileInputs = document.querySelectorAll('.claim-upload-btn input[type="file"]');
+    claimFileInputs.forEach(input => {
+        input.addEventListener('change', function() {
+            const container = this.closest('.claim-upload-container');
+            const countSpan = container.querySelector('.file-count');
+            
+            if (this.files.length > 0) {
+                if (!countSpan) {
+                    const span = document.createElement('span');
+                    span.className = 'file-count';
+                    span.style.marginLeft = '10px';
+                    span.style.color = '#3498db';
+                    span.style.fontWeight = 'bold';
+                    this.parentNode.appendChild(span);
+                }
+                this.parentNode.querySelector('.file-count').textContent = `${this.files.length} image(s) selected`;
+            } else {
+                if (countSpan) {
+                    countSpan.remove();
+                }
+            }
+        });
+    });
+});
+
+// Format file size
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
 </script>
 
 </body>
