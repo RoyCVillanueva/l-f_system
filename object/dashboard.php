@@ -1380,19 +1380,17 @@ if ($isAdmin) {
         <?php endif; ?>
 
         <div class="item-details">
-            <h3><?php echo htmlspecialchars($item['category_name']); ?></h3>
-            
+            <h3><?php echo htmlspecialchars($item['category_name']); ?></h3> 
             <div class="item-description">
                 <p><strong>Description:</strong> <?php echo htmlspecialchars($item['description']); ?></p>
-            </div>
-            
-            <p><strong>Location:</strong> <?php echo htmlspecialchars($item['location_name']); ?></p>
-            <p><strong>Date:</strong> <?php echo date('M j, Y', strtotime($item['created_at'])); ?></p>
+                <p><strong>Location:</strong> <?php echo htmlspecialchars($item['location_name']); ?></p>
+                <p><strong>Date:</strong> <?php echo date('M j, Y', strtotime($item['created_at'])); ?></p>
             <?php if ($item['report_type'] == 'lost' && !empty($item['date_lost'])): ?>
                 <p><strong>Date Lost:</strong> <?php echo date('M j, Y', strtotime($item['date_lost'])); ?></p>
             <?php elseif ($item['report_type'] == 'found' && !empty($item['date_found'])): ?>
                 <p><strong>Date Found:</strong> <?php echo date('M j, Y', strtotime($item['date_found'])); ?></p>
             <?php endif; ?>
+            </div>  
         </div>
 
         <?php 
