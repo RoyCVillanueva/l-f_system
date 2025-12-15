@@ -1531,12 +1531,7 @@ if ($isAdmin) {
         <textarea id="claim_description_<?php echo $item['report_id']; ?>" 
               name="claim_description" 
               required 
-              placeholder="Please provide detailed information to support your claim:
-• Describe distinctive features of the item
-• Mention when and where you lost it
-• Provide any serial numbers or unique identifiers
-• Explain any modifications or personalization
-• Share purchase details or proof of ownership"></textarea>
+              placeholder="Please provide detailed information to support your claim."></textarea>
 </div>
         
         <!-- Image Upload Section -->
@@ -1546,11 +1541,7 @@ if ($isAdmin) {
             </div>
             
             <div class="claim-upload-instructions">
-                <p>Upload images that help verify your ownership claim:</p>
-                <ul>
-                    <li>Photos of you with the item</li>
-                    <li>Previous photos showing the item's condition</li>
-                </ul>
+                <p>Upload images that help verify your ownership claim</p>
                 <p><small>Max 5 images, 20MB each. Supported: JPG, PNG, GIF</small></p>
             </div>
             
@@ -1563,7 +1554,7 @@ if ($isAdmin) {
                     name="claim_images[]" 
                     multiple 
                     accept="image/*"
-                    onchange="previewClaimImages(event, '<?php echo $item['report_id']; ?>')">
+                    data-report-id="<?php echo $item['report_id']; ?>">
             </div>
             
             <!-- Image Preview Container -->
@@ -2640,7 +2631,7 @@ if ($isAdmin) {
 </div>
             <?php endif; ?>
         </div>
-    <div class="report-generation-section" style="margin-top: 40px; padding: 25px; background: #f8f9fa; border-radius: 10px; border: 1px solid #dee2e6;">
+<div class="report-generation-section">
     <h3 style="margin-bottom: 25px; color: #343a40;">Generate Detailed Report</h3>
     
     <form method="POST" action="" id="report-form">
@@ -3548,22 +3539,23 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // Claim image preview functionality
 function previewClaimImages(event, reportId) {
-    const files = event.target.files;
+    const input = event.target;
+    const files = input.files;
     const previewContainer = document.getElementById('claim-image-preview-' + reportId);
     
-    // Clear previous previews
-    previewContainer.innerHTML = '';
+    // Clear only new previews, not existing ones
+    const existingPreviews = previewContainer.querySelectorAll('.claim-image-preview-item[data-is-new="true"]');
+    existingPreviews.forEach(preview => preview.remove());
     
     if (files.length === 0) {
-        previewContainer.style.display = 'none';
+        if (previewContainer.children.length === 0) {
+            previewContainer.style.display = 'none';
+        }
         return;
     }
     
     // Show preview container
     previewContainer.style.display = 'grid';
-    previewContainer.style.gridTemplateColumns = 'repeat(auto-fill, minmax(100px, 1fr))';
-    previewContainer.style.gap = '10px';
-    previewContainer.style.marginTop = '10px';
     
     // Process each file
     for (let i = 0; i < files.length; i++) {
@@ -3581,70 +3573,35 @@ function previewClaimImages(event, reportId) {
             continue;
         }
         
+        // Check if this file is already previewed
+        const existingFile = previewContainer.querySelector(
+            `.claim-image-preview-item[data-file-name="${file.name}"]`
+        );
+        if (existingFile) {
+            continue; // Skip duplicate
+        }
+        
         const reader = new FileReader();
         reader.onload = function(e) {
             const previewDiv = document.createElement('div');
-            previewDiv.style.cssText = `
-                position: relative;
-                width: 100px;
-                height: 100px;
-                border-radius: 8px;
-                overflow: hidden;
-                border: 2px solid #e9ecef;
-                background: #f8f9fa;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-            `;
+            previewDiv.className = 'claim-image-preview-item';
+            previewDiv.setAttribute('data-file-name', file.name);
+            previewDiv.setAttribute('data-is-new', 'true');
+            previewDiv.setAttribute('data-report-id', reportId);
             
             const img = document.createElement('img');
             img.src = e.target.result;
-            img.style.cssText = `
-                max-width: 100%;
-                max-height: 100%;
-                object-fit: contain;
-            `;
             img.alt = `Claim Image ${i + 1}`;
             
             const removeBtn = document.createElement('button');
             removeBtn.type = 'button';
+            removeBtn.className = 'claim-remove-image';
             removeBtn.innerHTML = '×';
-            removeBtn.style.cssText = `
-                position: absolute;
-                top: 5px;
-                right: 5px;
-                background: #dc3545;
-                color: white;
-                border: none;
-                border-radius: 50%;
-                width: 20px;
-                height: 20px;
-                font-size: 14px;
-                font-weight: bold;
-                cursor: pointer;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                line-height: 1;
-                padding: 0;
-            `;
-            removeBtn.onclick = function() {
-                removeClaimImagePreview(file.name, event.target, previewDiv, reportId);
-            };
+            removeBtn.title = 'Remove this image';
             
             // File info overlay
             const fileInfo = document.createElement('div');
-            fileInfo.style.cssText = `
-                position: absolute;
-                bottom: 0;
-                left: 0;
-                right: 0;
-                background: rgba(0,0,0,0.7);
-                color: white;
-                padding: 2px;
-                font-size: 8px;
-                text-align: center;
-            `;
+            fileInfo.className = 'claim-image-info';
             fileInfo.textContent = `${file.name.substring(0, 15)}...`;
             
             previewDiv.appendChild(img);
@@ -3665,35 +3622,58 @@ function removeClaimImagePreview(fileName, fileInput, previewDiv, reportId) {
     // Create a new FileList without the removed file
     const dataTransfer = new DataTransfer();
     const files = fileInput.files;
+    let fileRemoved = false;
     
     for (let i = 0; i < files.length; i++) {
         if (files[i].name !== fileName) {
             dataTransfer.items.add(files[i]);
+        } else {
+            fileRemoved = true;
         }
     }
     
     // Update file input
     fileInput.files = dataTransfer.files;
     
-    // Trigger change event to update preview count
-    fileInput.dispatchEvent(new Event('change'));
-    
     // Hide preview container if no images left
     const previewContainer = document.getElementById('claim-image-preview-' + reportId);
     if (previewContainer.children.length === 0) {
         previewContainer.style.display = 'none';
     }
+    
+    // Trigger change event to update form state
+    if (fileRemoved) {
+        fileInput.dispatchEvent(new Event('change'));
+    }
 }
 
 // Initialize claim image functionality
 document.addEventListener('DOMContentLoaded', function() {
-    // Set up claim image previews
-    const claimFileInputs = document.querySelectorAll('input[name="claim_images[]"]');
-    claimFileInputs.forEach(input => {
-        input.addEventListener('change', function() {
-            const reportId = this.id.replace('claim_images_', '');
-            previewClaimImages({target: this}, reportId);
-        });
+    // Set up claim image previews - single event delegation
+    document.body.addEventListener('change', function(e) {
+        if (e.target && e.target.matches('input[name="claim_images[]"]')) {
+            const reportId = e.target.id.replace('claim_images_', '');
+            previewClaimImages(e, reportId);
+        }
+    });
+    
+    // Set up claim form removal - also using event delegation
+    document.body.addEventListener('click', function(e) {
+        if (e.target && e.target.classList.contains('claim-remove-image')) {
+            e.preventDefault();
+            const previewDiv = e.target.closest('.claim-image-preview-item');
+            const fileInput = previewDiv ? 
+                document.querySelector('input[name="claim_images[]"][data-report-id="' + 
+                    previewDiv.getAttribute('data-report-id') + '"]') : null;
+            if (previewDiv && fileInput) {
+                removeClaimImagePreview(
+                    previewDiv.getAttribute('data-file-name'), 
+                    fileInput, 
+                    previewDiv, 
+                    previewDiv.getAttribute('data-report-id')
+                );
+            }
+        }
     });
 });
 </script>
