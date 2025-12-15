@@ -1929,7 +1929,7 @@ if ($isAdmin) {
                                 <?php if ($reportDetails['report_type'] == 'found' && $reportDetails['status'] == 'confirmed'): ?>
                                     <div class="approved-info" style="padding: 10px; background: #d4edda; border-radius: 5px; text-align: center;">
                                         <p style="margin: 0; color: #155724;">
-                                            <strong>✅ Your claim has been approved!</strong>
+                                            <strong>Your claim has been approved!</strong>
                                         </p>
                                         <p style="margin: 5px 0 0 0; color: #155724;">
                                             Please contact the admin to arrange item pickup.
@@ -1938,7 +1938,7 @@ if ($isAdmin) {
                                 <?php elseif ($reportDetails['report_type'] == 'lost'): ?>
                                     <div class="approved-info" style="padding: 10px; background: #d4edda; border-radius: 5px; text-align: center;">
                                         <p style="margin: 0; color: #155724;">
-                                            <strong>✅ Your claim has been approved!</strong>
+                                            <strong>Your claim has been approved!</strong>
                                         </p>
                                         <p style="margin: 5px 0 0 0; color: #155724;">
                                             The item owner has been notified.
@@ -1948,7 +1948,7 @@ if ($isAdmin) {
                             <?php elseif ($claim['status'] == 'completed'): ?>
                                 <div class="completed-info" style="padding: 10px; background: #cce5ff; border-radius: 5px; text-align: center;">
                                     <p style="margin: 0; color: #004085;">
-                                        <strong>🏁 Claim completed!</strong>
+                                        <strong>Claim completed!</strong>
                                     </p>
                                     <p style="margin: 5px 0 0 0; color: #004085;">
                                         Item has been successfully returned.
@@ -1957,7 +1957,7 @@ if ($isAdmin) {
                             <?php elseif ($claim['status'] == 'rejected'): ?>
                                 <div class="rejected-info" style="padding: 10px; background: #f8d7da; border-radius: 5px; text-align: center;">
                                     <p style="margin: 0; color: #721c24;">
-                                        <strong>❌ Your claim has been rejected.</strong>
+                                        <strong>Your claim has been rejected.</strong>
                                     </p>
                                     <?php if (!empty($claim['admin_notes'])): ?>
                                         <p style="margin: 5px 0 0 0; color: #721c24;">
