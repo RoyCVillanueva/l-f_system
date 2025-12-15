@@ -127,10 +127,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             </div>
             
             <div class="form-group">
-                <label for="phone_number">Phone Number</label>
+                <label for="phone_number">Phone Number (Optional)</label>
                 <input type="tel" id="phone_number" name="phone_number" 
                        value="<?php echo isset($_POST['phone_number']) ? $_POST['phone_number'] : ''; ?>" 
-                       placeholder="Optional phone number">
+                       placeholder="Enter your phone number">
             </div>
             
             <div class="form-group">

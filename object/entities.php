@@ -435,45 +435,49 @@ class Report {
         return $prefix . str_pad($number, 3, '0', STR_PAD_LEFT);
     }
     
-public function getReportsByUser($user_id) {
-    $stmt = $this->db->prepare("
-        SELECT r.*, i.description, i.item_id, l.location_name, c.category_name,
-               (SELECT GROUP_CONCAT(claim_id) FROM claim WHERE report_id = r.report_id) as claim_ids
-        FROM report r
-        LEFT JOIN item i ON r.item_id = i.item_id
-        LEFT JOIN location l ON i.location_id = l.location_id
-        LEFT JOIN category c ON i.category_id = c.category_id
-        WHERE r.user_id = ?
-        ORDER BY r.created_at DESC
-    ");
-    $stmt->execute([$user_id]);
-    $reports = $stmt->fetchAll(PDO::FETCH_ASSOC); // Explicitly fetch as associative array
-    
-    // Get claims for each report
-    foreach ($reports as &$report) {
-        if ($report['claim_ids']) {
-            $claimStmt = $this->db->prepare("
-                SELECT * FROM claim 
-                WHERE report_id = ? 
-                ORDER BY created_at DESC
-            ");
-            $claimStmt->execute([$report['report_id']]);
-            $report['claims'] = $claimStmt->fetchAll(PDO::FETCH_ASSOC); // Fetch as associative array
-        } else {
-            $report['claims'] = [];
+    public function getReportsByUserId($user_id) {
+        try {
+            $db = DatabaseService::getInstance()->getConnection();
+            
+            $sql = "SELECT 
+                        r.*,
+                        i.item_id,
+                        i.description,
+                        i.category_id,
+                        i.location_id,
+                        cat.category_name,
+                        loc.location_name,
+                        u.username as reporter_name,
+                        u.email as reporter_email
+                    FROM report r
+                    JOIN item i ON r.item_id = i.item_id
+                    LEFT JOIN category cat ON i.category_id = cat.category_id
+                    LEFT JOIN location loc ON i.location_id = loc.location_id
+                    LEFT JOIN users u ON r.user_id = u.user_id
+                    WHERE r.user_id = :user_id
+                    ORDER BY r.created_at DESC";
+            
+            $stmt = $db->prepare($sql);
+            $stmt->execute([':user_id' => $user_id]);
+            $reports = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            
+            // Get images for each report
+            $item = new Item();
+            foreach ($reports as &$report) {
+                $report['images'] = $item->getItemImages($report['item_id']);
+                
+                // Get claims for each report
+                $claim = new Claim();
+                $report['claims'] = $claim->getClaimsByReportId($report['report_id']);
+            }
+            
+            return $reports;
+            
+        } catch (PDOException $e) {
+            error_log("Error getting reports by user ID: " . $e->getMessage());
+            return [];
         }
-        
-        // Get images for the item
-        $imageStmt = $this->db->prepare("
-            SELECT * FROM item_image 
-            WHERE item_id = ?
-        ");
-        $imageStmt->execute([$report['item_id']]);
-        $report['images'] = $imageStmt->fetchAll(PDO::FETCH_ASSOC); // Fetch as associative array
     }
-    
-    return $reports;
-}
     public function getReportById($report_id) {
     $stmt = $this->db->prepare("
         SELECT r.*, i.description, i.item_id, i.category_id, l.location_name, c.category_name,
@@ -741,17 +745,26 @@ class Claim {
         $this->db = DatabaseService::getInstance()->getConnection();
     }
     
-    public function create($claim_id, $status, $report_id, $claimed_by, $claim_description = null) {
+public function create($claim_id, $status, $report_id, $claimed_by, $claim_description) {
         try {
-            $stmt = $this->db->prepare("
-                INSERT INTO claim (claim_id, status, report_id, claimed_by, claim_description) 
-                VALUES (?, ?, ?, ?, ?)
-            ");
-            $result = $stmt->execute([$claim_id, $status, $report_id, $claimed_by, $claim_description]);
-            error_log("Claim creation result: " . ($result ? "SUCCESS" : "FAILED"));
+            $db = DatabaseService::getInstance()->getConnection();
+            
+            $sql = "INSERT INTO claim (claim_id, status, report_id, claimed_by, claim_description) 
+                    VALUES (:claim_id, :status, :report_id, :claimed_by, :claim_description)";
+            
+            $stmt = $db->prepare($sql);
+            $result = $stmt->execute([
+                ':claim_id' => $claim_id,
+                ':status' => $status,
+                ':report_id' => $report_id,
+                ':claimed_by' => $claimed_by,
+                ':claim_description' => $claim_description
+            ]);
+            
             return $result;
+            
         } catch (PDOException $e) {
-            error_log("Claim creation error: " . $e->getMessage());
+            error_log("Error creating claim: " . $e->getMessage());
             return false;
         }
     }
@@ -768,26 +781,98 @@ class Claim {
             return 'CLM001';
         }
     }
-    
-    public function getClaimsByStatus($status) {
+    public function getClaimImages($claim_id) {
         try {
-            $stmt = $this->db->prepare("
-                SELECT c.*, r.report_type, i.description as item_description, 
-                       u.username as claimant_username, u.email as claimant_email,
-                       ur.username as reporter_username, ur.email as reporter_email,
-                       r.item_id, i.reported_by, r.report_id
-                FROM claim c
-                LEFT JOIN report r ON c.report_id = r.report_id
-                LEFT JOIN item i ON r.item_id = i.item_id
-                LEFT JOIN users u ON c.claimed_by = u.user_id
-                LEFT JOIN users ur ON r.user_id = ur.user_id
-                WHERE c.status = ?
-                ORDER BY c.created_at DESC
-            ");
-            $stmt->execute([$status]);
-            $claims = $stmt->fetchAll();
-            error_log("Found " . count($claims) . " claims with status: " . $status);
+            $db = DatabaseService::getInstance()->getConnection();
+            
+            $sql = "SELECT * FROM claim_images WHERE claim_id = :claim_id ORDER BY created_at ASC";
+            $stmt = $db->prepare($sql);
+            $stmt->execute([':claim_id' => $claim_id]);
+            
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+            
+        } catch (PDOException $e) {
+            // Table might not exist yet, return empty array
+            return [];
+        }
+    }
+    public function getClaimsByUserId($user_id) {
+        try {
+            $db = DatabaseService::getInstance()->getConnection();
+            
+            $sql = "SELECT 
+                        c.*,
+                        r.report_id,
+                        r.report_type,
+                        r.status as report_status,
+                        r.date_lost,
+                        r.date_found,
+                        i.item_id,
+                        i.description as item_description,
+                        cat.category_name,
+                        loc.location_name,
+                        u.username as reporter_name,
+                        u.email as reporter_email
+                    FROM claim c
+                    JOIN report r ON c.report_id = r.report_id
+                    JOIN item i ON r.item_id = i.item_id
+                    LEFT JOIN category cat ON i.category_id = cat.category_id
+                    LEFT JOIN location loc ON i.location_id = loc.location_id
+                    LEFT JOIN users u ON r.user_id = u.user_id
+                    WHERE c.claimed_by = :user_id
+                    ORDER BY c.created_at DESC";
+            
+            $stmt = $db->prepare($sql);
+            $stmt->execute([':user_id' => $user_id]);
+            $claims = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            
+            // Get claim images for each claim
+            foreach ($claims as &$claim) {
+                $claim['images'] = $this->getClaimImages($claim['claim_id']);
+            }
+            
             return $claims;
+            
+        } catch (PDOException $e) {
+            error_log("Error getting claims by user ID: " . $e->getMessage());
+            return [];
+        }
+    }
+
+public function getClaimsByStatus($status) {
+        try {
+            $db = DatabaseService::getInstance()->getConnection();
+            
+            $sql = "SELECT 
+                        c.*,
+                        r.report_id,
+                        r.report_type,
+                        r.status as report_status,
+                        i.description as item_description,
+                        u.username as claimant_name,
+                        u.email as claimant_email,
+                        ru.username as reporter_name,
+                        ru.email as reporter_email
+                    FROM claim c
+                    JOIN report r ON c.report_id = r.report_id
+                    JOIN item i ON r.item_id = i.item_id
+                    LEFT JOIN users u ON c.claimed_by = u.user_id
+                    LEFT JOIN users ru ON r.user_id = ru.user_id
+                    WHERE c.status = :status
+                    ORDER BY c.created_at ASC";
+            
+            $stmt = $db->prepare($sql);
+            $stmt->execute([':status' => $status]);
+            
+            $claims = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            
+            // Get claim images for each claim
+            foreach ($claims as &$claim) {
+                $claim['images'] = $this->getClaimImages($claim['claim_id']);
+            }
+            
+            return $claims;
+            
         } catch (PDOException $e) {
             error_log("Error getting claims by status: " . $e->getMessage());
             return [];
@@ -795,106 +880,148 @@ class Claim {
     }
     
     public function getClaimsByReportId($report_id) {
-    $stmt = $this->db->prepare("
-        SELECT c.*, u.username as claimant_username 
-        FROM claim c 
-        LEFT JOIN users u ON c.claimed_by = u.user_id 
-        WHERE c.report_id = ? 
-        ORDER BY c.created_at DESC
-    ");
-    $stmt->execute([$report_id]);
-    return $stmt->fetchAll();
-}
-    
-    public function updateStatus($claim_id, $status, $admin_notes = null) {
         try {
-            $stmt = $this->db->prepare("
-                UPDATE claim 
-                SET status = ?, admin_notes = ?, updated_at = CURRENT_TIMESTAMP 
-                WHERE claim_id = ?
-            ");
-            $result = $stmt->execute([$status, $admin_notes, $claim_id]);
-            error_log("Claim status update - ID: {$claim_id}, Status: {$status}, Result: " . ($result ? "SUCCESS" : "FAILED"));
-            return $result;
+            $db = DatabaseService::getInstance()->getConnection();
+            
+            $sql = "SELECT 
+                        c.*,
+                        u.username as claimant_name,
+                        u.email as claimant_email
+                    FROM claim c
+                    LEFT JOIN users u ON c.claimed_by = u.user_id
+                    WHERE c.report_id = :report_id
+                    ORDER BY c.created_at DESC";
+            
+            $stmt = $db->prepare($sql);
+            $stmt->execute([':report_id' => $report_id]);
+            
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+            
         } catch (PDOException $e) {
-            error_log("Claim status update error: " . $e->getMessage());
+            error_log("Error getting claims by report ID: " . $e->getMessage());
+            return [];
+        }
+    }
+    
+    public function updateStatus($claim_id, $status, $admin_notes = '') {
+        try {
+            $db = DatabaseService::getInstance()->getConnection();
+            
+            $sql = "UPDATE claim 
+                    SET status = :status, 
+                        admin_notes = :admin_notes,
+                        updated_at = CURRENT_TIMESTAMP 
+                    WHERE claim_id = :claim_id";
+            
+            $stmt = $db->prepare($sql);
+            $result = $stmt->execute([
+                ':status' => $status,
+                ':admin_notes' => $admin_notes,
+                ':claim_id' => $claim_id
+            ]);
+            
+            return $result;
+            
+        } catch (PDOException $e) {
+            error_log("Error updating claim status: " . $e->getMessage());
             return false;
         }
     }
     
     public function getClaimById($claim_id) {
         try {
-            $stmt = $this->db->prepare("
-                SELECT c.*, r.report_type, i.description as item_description, r.report_id,
-                       u.username as claimant_username, u.email as claimant_email,
-                       ur.username as reporter_username
-                FROM claim c
-                LEFT JOIN report r ON c.report_id = r.report_id
-                LEFT JOIN item i ON r.item_id = i.item_id
-                LEFT JOIN users u ON c.claimed_by = u.user_id
-                LEFT JOIN users ur ON r.user_id = ur.user_id
-                WHERE c.claim_id = ?
-            ");
-            $stmt->execute([$claim_id]);
-            $claim = $stmt->fetch();
+            $db = DatabaseService::getInstance()->getConnection();
+            
+            $sql = "SELECT 
+                        c.*,
+                        r.report_id,
+                        r.report_type,
+                        r.status as report_status,
+                        r.user_id as reporter_id,
+                        i.item_id,
+                        i.description as item_description,
+                        u.username as claimant_name,
+                        u.email as claimant_email,
+                        ru.username as reporter_name,
+                        ru.email as reporter_email
+                    FROM claim c
+                    JOIN report r ON c.report_id = r.report_id
+                    JOIN item i ON r.item_id = i.item_id
+                    LEFT JOIN users u ON c.claimed_by = u.user_id
+                    LEFT JOIN users ru ON r.user_id = ru.user_id
+                    WHERE c.claim_id = :claim_id";
+            
+            $stmt = $db->prepare($sql);
+            $stmt->execute([':claim_id' => $claim_id]);
+            
+            $claim = $stmt->fetch(PDO::FETCH_ASSOC);
             
             if ($claim) {
-                error_log("Claim found: ID={$claim_id}, Report ID={$claim['report_id']}");
-            } else {
-                error_log("Claim not found: ID={$claim_id}");
+                $claim['images'] = $this->getClaimImages($claim_id);
             }
             
             return $claim;
+            
         } catch (PDOException $e) {
             error_log("Error getting claim by ID: " . $e->getMessage());
             return false;
         }
     }
-// In the Claim class, add these methods:
-public function sendClaimApprovedNotification($claim_id) {
-    $notification = new Notification();
-    $claimDetails = $this->getClaimById($claim_id);
-    
-    if ($claimDetails && $claimDetails['claimed_by']) {
-        $notification_id = $notification->generateNotificationId();
-        $title = "Claim Approved!";
-        $message = "Your claim (#{$claim_id}) has been approved! The item owner has been notified.";
-        
-        return $notification->create(
-            $notification_id, 
-            $claimDetails['claimed_by'], 
-            $title, 
-            $message, 
-            'claim_approved',
-            $claim_id
-        );
-    }
-    return false;
-}
 
-public function sendClaimRejectedNotification($claim_id, $admin_notes = '') {
-    $notification = new Notification();
-    $claimDetails = $this->getClaimById($claim_id);
-    
-    if ($claimDetails && $claimDetails['claimed_by']) {
-        $notification_id = $notification->generateNotificationId();
-        $title = "Claim Rejected";
-        $message = "Your claim (#{$claim_id}) has been rejected.";
-        if (!empty($admin_notes)) {
-            $message .= " Reason: " . $admin_notes;
+   public function sendClaimApprovedNotification($claim_id) {
+        try {
+            $claim = $this->getClaimById($claim_id);
+            if (!$claim) return false;
+            
+            $notification = new Notification();
+            $notification_id = $notification->generateNotificationId();
+            
+            $title = "Claim Approved";
+            $message = "Your claim for item '{$claim['item_description']}' has been approved. Please contact the admin to arrange pickup.";
+            
+            return $notification->create(
+                $notification_id,
+                $claim['claimed_by'],
+                'claim_approved',
+                $title,
+                $message,
+                $claim_id
+            );
+            
+        } catch (Exception $e) {
+            error_log("Error sending claim approved notification: " . $e->getMessage());
+            return false;
         }
-        
-        return $notification->create(
-            $notification_id, 
-            $claimDetails['claimed_by'], 
-            $title, 
-            $message, 
-            'claim_rejected',
-            $claim_id
-        );
     }
-    return false;
-}
+
+   public function sendClaimRejectedNotification($claim_id, $reason = '') {
+        try {
+            $claim = $this->getClaimById($claim_id);
+            if (!$claim) return false;
+            
+            $notification = new Notification();
+            $notification_id = $notification->generateNotificationId();
+            
+            $title = "Claim Rejected";
+            $message = "Your claim for item '{$claim['item_description']}' has been rejected.";
+            if (!empty($reason)) {
+                $message .= " Reason: " . $reason;
+            }
+            
+            return $notification->create(
+                $notification_id,
+                $claim['claimed_by'],
+                'claim_rejected',
+                $title,
+                $message,
+                $claim_id
+            );
+            
+        } catch (Exception $e) {
+            error_log("Error sending claim rejected notification: " . $e->getMessage());
+            return false;
+        }
+    }
 }
 
 class HandoverLog {
