@@ -537,13 +537,6 @@ class Report {
             if (!empty($claims)) {
                 error_log("Found " . count($claims) . " claims for report: " . $report_id);
                 
-                // Delete related handover logs first
-                foreach ($claims as $claim) {
-                    $handoverStmt = $this->db->prepare("DELETE FROM handover_log WHERE claim_id = ?");
-                    $handoverStmt->execute([$claim['claim_id']]);
-                    error_log("Deleted handover logs for claim: " . $claim['claim_id']);
-                }
-                
                 // Then delete the claims
                 $deleteClaimsStmt = $this->db->prepare("DELETE FROM claim WHERE report_id = ?");
                 $deleteClaimsStmt->execute([$report_id]);
@@ -1037,36 +1030,6 @@ public function getClaimsByStatus($status) {
             error_log("Error sending claim rejected notification: " . $e->getMessage());
             return false;
         }
-    }
-}
-
-class HandoverLog {
-    private $db;
-    
-    public function __construct() {
-        $this->db = DatabaseService::getInstance()->getConnection();
-    }
-    
-    public function create($claim_id, $admin_id) {
-        $stmt = $this->db->prepare("
-            INSERT INTO handover_log (claim_id, admin_id) 
-            VALUES (?, ?)
-        ");
-        return $stmt->execute([$claim_id, $admin_id]);
-    }
-    
-    public function getAllHandovers() {
-        $stmt = $this->db->prepare("
-            SELECT h.*, c.claim_id, u.username as admin_name, 
-                   cl.claimed_by, cu.username as claimant_name
-            FROM handover_log h
-            LEFT JOIN claim c ON h.claim_id = c.claim_id
-            LEFT JOIN users u ON h.admin_id = u.user_id
-            LEFT JOIN users cu ON c.claimed_by = cu.user_id
-            ORDER BY h.handover_date DESC
-        ");
-        $stmt->execute();
-        return $stmt->fetchAll();
     }
 }
 

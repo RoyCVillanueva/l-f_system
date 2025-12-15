@@ -150,9 +150,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'update_claim_status':
                 UpdateClaimStatus();
                 break;
-            case 'handover_item':
-                HandoverItem();
-                break;
             case 'update_report':
                 UpdateReport();
                 break;
