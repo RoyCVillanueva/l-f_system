@@ -311,7 +311,7 @@ textarea {
 .status-pending { background: #fff3cd; color: #856404; }
 .status-found { background: #d1ecf1; color: #0c5460; }
 .status-returned { background: #d4edda; color: #155724; }
-.status-confirmed { background: #d1ecf1; color: #0c5460; }
+.status-confirmed { background: #d1ecf1; color: #155724; }
 
 .item-image {
     width: 100%;
@@ -1658,7 +1658,7 @@ label:contains("*") .required-asterisk {
 .status-pending { background-color: #ffc107; }
 .status-found { background-color: #17a2b8; }
 .status-returned { background-color: #28a745; }
-.status-confirmed { background-color: #007bff; }
+
 
 .chart-bar {
     flex: 1;
@@ -1870,11 +1870,6 @@ label:contains("*") .required-asterisk {
     font-size: 14px;
     color: #2c3e50;
     line-height: 1.5;
-}
-
-.reporter-stats::before {
-    content: "📊 ";
-    margin-right: 5px;
 }
 
 /* Responsive Design for Statistics */

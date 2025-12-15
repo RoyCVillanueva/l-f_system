@@ -2187,51 +2187,61 @@ if ($isAdmin) {
                                 </tr>
                             </thead>
                             <tbody>
-                                <?php foreach ($allReports as $reportItem): ?>
-                                    <tr>
-                                        <td><code><?php echo $reportItem['report_id']; ?></code></td>
-                                        <td>
-                                            <span class="report-type-badge <?php echo $reportItem['report_type']; ?>">
-                                                <?php echo ucfirst($reportItem['report_type']); ?>
-                                            </span>
-                                        </td>
-                                        <td class="description-cell"><?php echo htmlspecialchars($reportItem['description']); ?></td>
-                                        <td><?php echo $reportItem['category_name']; ?></td>
-                                        <td><?php echo htmlspecialchars($reportItem['location_name']); ?></td>
-                                        <td>
-                                            <span class="item-status status-<?php echo $reportItem['status']; ?>">
-                                                <?php echo ucfirst($reportItem['status']); ?>
-                                            </span>
-                                        </td>
-                                        <td><?php echo date('M j, Y', strtotime($reportItem['created_at'])); ?></td>
-                                        <td>
-                                            <?php if ($reportItem['status'] == 'pending'): ?>
-                                                <form action="" method="POST" style="display: inline;">
-                                                    <input type="hidden" name="action" value="update_report_status">
-                                                    <input type="hidden" name="report_id" value="<?php echo $reportItem['report_id']; ?>">
-                                                    <input type="hidden" name="status" value="confirmed">
-                                                    <button type="submit" class="btn btn-success btn-sm" 
-                                                            onclick="return confirm('Mark this report as confirmed?')">
-                                                        Confirm
-                                                    </button>
-                                                </form>
-                                            <?php elseif ($reportItem['status'] == 'confirmed'): ?>
-                                                <form action="" method="POST" style="display: inline;">
-                                                    <input type="hidden" name="action" value="update_report_status">
-                                                    <input type="hidden" name="report_id" value="<?php echo $reportItem['report_id']; ?>">
-                                                    <input type="hidden" name="status" value="returned">
-                                                    <button type="submit" class="btn btn-primary btn-sm" 
-                                                            onclick="return confirm('Mark this item as returned?')">
-                                                        Mark Returned
-                                                    </button>
-                                                </form>
-                                            <?php else: ?>
-                                                <span class="text-muted">No actions</span>
-                                            <?php endif; ?>
-                                        </td>
-                                    </tr>
-                                <?php endforeach; ?>
-                            </tbody>
+    <?php foreach ($allReports as $reportItem): ?>
+        <tr>
+            <td><code><?php echo $reportItem['report_id']; ?></code></td>
+            <td>
+                <span class="report-type-badge <?php echo $reportItem['report_type']; ?>">
+                    <?php echo ucfirst($reportItem['report_type']); ?>
+                </span>
+            </td>
+            <td class="description-cell"><?php echo htmlspecialchars($reportItem['description']); ?></td>
+            <td><?php echo $reportItem['category_name']; ?></td>
+            <td><?php echo htmlspecialchars($reportItem['location_name']); ?></td>
+            <td>
+                <?php 
+                // Fetch reporter username
+                $db = DatabaseService::getInstance()->getConnection();
+                $stmt = $db->prepare("SELECT username FROM users WHERE user_id = ?");
+                $stmt->execute([$reportItem['user_id']]);
+                $reporter = $stmt->fetch(PDO::FETCH_ASSOC);
+                echo htmlspecialchars($reporter['username'] ?? 'Unknown');
+                ?>
+            </td>
+            <td>
+                <span class="item-status status-<?php echo $reportItem['status']; ?>">
+                    <?php echo ucfirst($reportItem['status']); ?>
+                </span>
+            </td>
+            <td><?php echo date('M j, Y', strtotime($reportItem['created_at'])); ?></td>
+            <td>
+                <?php if ($reportItem['status'] == 'pending'): ?>
+                    <form action="" method="POST" style="display: inline;">
+                        <input type="hidden" name="action" value="update_report_status">
+                        <input type="hidden" name="report_id" value="<?php echo $reportItem['report_id']; ?>">
+                        <input type="hidden" name="status" value="confirmed">
+                        <button type="submit" class="btn btn-success btn-sm" 
+                                onclick="return confirm('Mark this report as confirmed?')">
+                            Confirm
+                        </button>
+                    </form>
+                <?php elseif ($reportItem['status'] == 'confirmed'): ?>
+                    <form action="" method="POST" style="display: inline;">
+                        <input type="hidden" name="action" value="update_report_status">
+                        <input type="hidden" name="report_id" value="<?php echo $reportItem['report_id']; ?>">
+                        <input type="hidden" name="status" value="returned">
+                        <button type="submit" class="btn btn-primary btn-sm" 
+                                onclick="return confirm('Mark this item as returned?')">
+                            Mark Returned
+                        </button>
+                    </form>
+                <?php else: ?>
+                    <span class="text-muted">No actions</span>
+                <?php endif; ?>
+            </td>
+        </tr>
+    <?php endforeach; ?>
+</tbody>
                         </table>
                     </div>
                 <?php endif; ?>
@@ -2539,26 +2549,95 @@ if ($isAdmin) {
                 </div>
             </div>
 
-            <!-- Top Reporters -->
-            <div class="stats-section">
-                <h3>Top Reporters</h3>
-                <div class="top-reporters">
-                    <?php
-                    $topReporters = $stats->getTopReporters();
-                    foreach ($topReporters as $reporter): 
-                        $successRate = $reporter['report_count'] > 0 ? 
-                            round(($reporter['returned_count'] / $reporter['report_count']) * 100, 1) : 0;
-                    ?>
-                        <div class="reporter-item">
-                            <span class="reporter-stats">
-                                <?php echo $reporter['report_count']; ?> reports • 
-                                <?php echo $reporter['returned_count']; ?> returned • 
-                                <?php echo $successRate; ?>% success
-                            </span>
-                        </div>
-                    <?php endforeach; ?>
-                </div>
+<!-- Top Reporters -->
+<div class="stats-section">
+    <h3>Top Reporters</h3>
+    <div class="top-reporters">
+        <?php
+        $topReporters = $stats->getTopReporters();
+        
+        if (empty($topReporters)): ?>
+            <div style="text-align: center; padding: 20px; color: #6c757d; font-style: italic;">
+                No reporter data available
             </div>
+        <?php else: ?>
+            <div class="reporter-table">
+                <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+                    <thead>
+                        <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
+                            <th style="padding: 10px; text-align: left; width: 40%;">Reporter</th>
+                            <th style="padding: 10px; text-align: center;">Total Reports</th>
+                            <th style="padding: 10px; text-align: center;">Items Returned</th>
+                            <th style="padding: 10px; text-align: center;">Success Rate</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($topReporters as $reporter): 
+                            $successRate = $reporter['report_count'] > 0 ? 
+                                round(($reporter['returned_count'] / $reporter['report_count']) * 100, 1) : 0;
+                            
+                            // Determine success rate color
+                            $rateColor = '#dc3545'; // red
+                            if ($successRate >= 80) {
+                                $rateColor = '#28a745'; // green
+                            } elseif ($successRate >= 50) {
+                                $rateColor = '#ffc107'; // yellow
+                            }
+                        ?>
+                        <tr style="border-bottom: 1px solid #e9ecef;">
+                            <td style="padding: 10px; vertical-align: middle;">
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <div style="width: 32px; height: 32px; border-radius: 50%; background: #6f42c1; 
+                                         display: flex; align-items: center; justify-content: center; color: white; 
+                                         font-weight: bold; font-size: 14px;">
+                                        <?php echo strtoupper(substr($reporter['username'] ?? 'U', 0, 1)); ?>
+                                    </div>
+                                    <div>
+                                        <strong><?php echo htmlspecialchars($reporter['username']); ?></strong>
+                                        <div style="font-size: 12px; color: #6c757d;">
+                                            ID: <?php echo $reporter['user_id']; ?>
+                                        </div>
+                                    </div>
+                                </div>
+                            </td>
+                            <td style="padding: 10px; text-align: center; vertical-align: middle;">
+                                <span style="font-weight: bold; font-size: 16px;"><?php echo $reporter['report_count']; ?></span>
+                            </td>
+                            <td style="padding: 10px; text-align: center; vertical-align: middle;">
+                                <span style="font-weight: bold; font-size: 16px; color: #28a745;">
+                                    <?php echo $reporter['returned_count']; ?>
+                                </span>
+                            </td>
+                            <td style="padding: 10px; text-align: center; vertical-align: middle;">
+                                <div style="display: flex; align-items: center; justify-content: center; gap: 8px;">
+                                    <div style="width: 100px; background: #e9ecef; border-radius: 10px; height: 10px; overflow: hidden;">
+                                        <div style="width: <?php echo $successRate; ?>%; height: 100%; 
+                                             background: <?php echo $rateColor; ?>;"></div>
+                                    </div>
+                                    <span style="font-weight: bold; color: <?php echo $rateColor; ?>;">
+                                        <?php echo $successRate; ?>%
+                                    </span>
+                                </div>
+                            </td>
+                        </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+            
+            <div style="margin-top: 15px; padding: 10px; background: #f8f9fa; border-radius: 8px; font-size: 14px; color: #495057;">
+                <strong>Summary:</strong> 
+                <?php
+                $totalReports = array_sum(array_column($topReporters, 'report_count'));
+                $totalReturned = array_sum(array_column($topReporters, 'returned_count'));
+                $avgSuccessRate = $totalReports > 0 ? round(($totalReturned / $totalReports) * 100, 1) : 0;
+                ?>
+                Top 10 reporters filed <?php echo $totalReports; ?> reports with 
+                <?php echo $totalReturned; ?> items returned (<?php echo $avgSuccessRate; ?>% average success rate)
+            </div>
+        <?php endif; ?>
+    </div>
+</div>
             <?php endif; ?>
         </div>
     <div class="report-generation-section" style="margin-top: 40px; padding: 25px; background: #f8f9fa; border-radius: 10px; border: 1px solid #dee2e6;">
@@ -2739,7 +2818,7 @@ if ($isAdmin) {
                             $date = $dateField ? date('M j, Y', strtotime($dateField)) : date('M j, Y', strtotime($item['report_date']));
                         ?>
                         <tr style="border-bottom: 1px solid #e9ecef;">
-                            <td style="padding: 10px; vertical-align: top;"><code><?php echo $item['report_id']; ?></code></td>
+                        <td style="padding: 10px; vertical-align: top;"><code><?php echo $item['report_id']; ?></code></td>
                             <td style="padding: 10px; vertical-align: top;">
                                 <span style="padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; 
                                     background: <?php echo $item['report_type'] === 'lost' ? '#fff5f5' : '#f0f9ff'; ?>; 
@@ -2767,8 +2846,20 @@ if ($isAdmin) {
                             <td style="padding: 10px; vertical-align: top;"><?php echo $item['category_name']; ?></td>
                             <td style="padding: 10px; vertical-align: top;"><?php echo htmlspecialchars($item['location_name']); ?></td>
                             <td style="padding: 10px; vertical-align: top;">
-                                <div><?php echo htmlspecialchars($item['reporter']); ?></div>
-                                <small style="color: #6c757d; font-size: 12px;"><?php echo htmlspecialchars($item['reporter_email']); ?></small>
+                                <?php 
+                                // Check if item has user_id
+                                if (isset($item['user_id'])) {
+                                    // Fetch reporter username
+                                    $db = DatabaseService::getInstance()->getConnection();
+                                    $stmt = $db->prepare("SELECT username FROM users WHERE user_id = ?");
+                                    $stmt->execute([$item['user_id']]);
+                                    $reporter = $stmt->fetch(PDO::FETCH_ASSOC);
+                                    echo htmlspecialchars($reporter['username'] ?? 'Unknown');
+                                } else {
+                                    echo 'Unknown';
+                                }
+                                ?>
+                                </td>
                             </td>
                         </tr>
                         <?php endforeach; ?>

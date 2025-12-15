@@ -580,19 +580,35 @@ class Report {
     }
 
     
-    public function getAllReportsWithDetails() {
-        $stmt = $this->db->prepare("
-            SELECT r.*, i.description, l.location_name, c.category_name, u.username
-            FROM report r
-            LEFT JOIN item i ON r.item_id = i.item_id
-            LEFT JOIN location l ON i.location_id = l.location_id
-            LEFT JOIN category c ON i.category_id = c.category_id
-            LEFT JOIN users u ON r.user_id = u.user_id
-            ORDER BY r.created_at DESC
-        ");
-        $stmt->execute();
-        return $stmt->fetchAll();
-    }
+public function getAllReportsWithDetails() {
+    $db = DatabaseService::getInstance()->getConnection();
+    $query = "
+        SELECT 
+            r.report_id,
+            r.status,
+            r.report_type,
+            r.date_lost,
+            r.date_found,
+            r.created_at,
+            r.user_id,  
+            u.username as reporter_name,
+            u.email as reporter_email,
+            i.description,
+            i.item_id,
+            c.category_name,
+            l.location_name
+        FROM report r
+        LEFT JOIN users u ON r.user_id = u.user_id
+        LEFT JOIN item i ON r.item_id = i.item_id
+        LEFT JOIN category c ON i.category_id = c.category_id
+        LEFT JOIN location l ON i.location_id = l.location_id
+        ORDER BY r.created_at DESC
+    ";
+    
+    $stmt = $db->prepare($query);
+    $stmt->execute();
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
     
     public function updateStatus($report_id, $status) {
         try {
@@ -1165,20 +1181,25 @@ class Statistics {
     }
     
     // User Activity
-    public function getTopReporters() {
-        $stmt = $this->db->prepare("
-            SELECT u.username, COUNT(r.report_id) as report_count,
-                   SUM(CASE WHEN r.status = 'returned' THEN 1 ELSE 0 END) as returned_count
-            FROM users u
-            LEFT JOIN report r ON u.user_id = r.user_id
-            WHERE r.report_id IS NOT NULL
-            GROUP BY u.user_id, u.username
-            ORDER BY report_count DESC
-            LIMIT 10
-        ");
-        $stmt->execute();
-        return $stmt->fetchAll();
-    }
+public function getTopReporters() {
+    $db = DatabaseService::getInstance()->getConnection();
+    $query = "
+        SELECT 
+            u.user_id,
+            u.username,
+            COUNT(r.report_id) as report_count,
+            SUM(CASE WHEN r.status = 'returned' THEN 1 ELSE 0 END) as returned_count
+        FROM report r
+        LEFT JOIN users u ON r.user_id = u.user_id
+        GROUP BY u.user_id, u.username
+        ORDER BY report_count DESC, returned_count DESC
+        LIMIT 10
+    ";
+    
+    $stmt = $db->prepare($query);
+    $stmt->execute();
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
     
     // Location-wise Statistics
     public function getLocationStats() {
@@ -1210,32 +1231,31 @@ class Statistics {
         return $stmt->fetchAll();
     }
 
-    public function getItemsByDateRange($startDate, $endDate, $reportType = null) {
+ public function getItemsByDateRange($startDate, $endDate, $reportType = null) {
     $db = DatabaseService::getInstance()->getConnection();
     
     $query = "
         SELECT 
             r.report_id,
-            r.report_type,
             r.status,
-            r.created_at as report_date,
+            r.report_type,
             r.date_lost,
             r.date_found,
+            r.created_at as report_date,
+            r.user_id,  -- ADD THIS
+            u.username as reporter,  -- ADD THIS
             i.description,
-            i.item_id,
             c.category_name,
-            l.location_name,
-            u.username as reporter,
-            u.email as reporter_email
+            l.location_name
         FROM report r
-        JOIN item i ON r.item_id = i.item_id
-        JOIN category c ON i.category_id = c.category_id
-        JOIN location l ON i.location_id = l.location_id
-        JOIN users u ON r.user_id = u.user_id
-        WHERE DATE(r.created_at) BETWEEN ? AND ?
+        LEFT JOIN users u ON r.user_id = u.user_id  -- ADD THIS JOIN
+        LEFT JOIN item i ON r.item_id = i.item_id
+        LEFT JOIN category c ON i.category_id = c.category_id
+        LEFT JOIN location l ON i.location_id = l.location_id
+        WHERE r.created_at BETWEEN ? AND ?
     ";
     
-    $params = [$startDate, $endDate];
+    $params = [$startDate . ' 00:00:00', $endDate . ' 23:59:59'];
     
     if ($reportType) {
         $query .= " AND r.report_type = ?";
